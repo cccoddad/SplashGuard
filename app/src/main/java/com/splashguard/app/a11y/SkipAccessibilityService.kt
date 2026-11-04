@@ -14,15 +14,25 @@ import java.util.ArrayDeque
 /**
  * 冷启动后自动点「跳过」。
  *
- * 两条触发路径：
- *  - 事件驱动：窗口内容变化时扫一次
- *  - 抢跑轮询：窗口出现后的 [POLL_WINDOW_MS] 内每 [POLL_INTERVAL_MS] 扫一次
- *    （跳过按钮常延迟 300~800ms 才渲染，只靠事件会错过；摇一摇广告正是抢这段空窗）
+ * ## 省电设计（v0.1.5 重写）
  *
- * 严格约束（宁可漏点，也不误点）：
- *  1. 只在窗口切换后的 6 秒内工作
+ * 早期版本同时监听 `TYPE_WINDOW_CONTENT_CHANGED`，导致滚动列表、播放视频、打字时的每一次
+ * 界面变化都会触发一次全树遍历 —— 实测后台 CPU 时间飙到 2 分 48 秒、整机发烫。
+ *
+ * 现在只监听 `TYPE_WINDOW_STATE_CHANGED`，并且**只在包名变化时**才认为是「切了一个 App」，
+ * 同包名内的对话框 / Toast / 页面切换一律忽略。配合一个收敛的轮询窗口：
+ *
+ * ```
+ * 切到新 App ──100ms×6──> 600ms ──300ms×3──> 1500ms 停止
+ * ```
+ *
+ * 单次切换最多 9 次扫描、每次最多 150 个节点；点到即停。相比旧版「每次切换 15 次 × 500 节点
+ * + 内容变化时无限次全树」，CPU 占用降低约一个数量级。
+ *
+ * ## 防误点红线（不变）
+ *  1. 只在窗口切换后的 1.5 秒内工作
  *  2. 只匹配「跳过 / 跳过广告 / 关闭广告 / Skip」这类文本
- *  3. 控件宽高必须远小于屏幕（避免整块广告位被当成按钮）—— 文字节点和最终点击的父节点都要过这道闸
+ *  3. 控件宽高必须远小于屏幕 —— 文字节点和最终点击的父节点都要过这道闸
  *  4. 每个窗口最多点一次，两次点击至少间隔 2 秒
  *  5. 不处理本应用自己的界面
  *  6. 不点击「摇一摇 / 扭一扭 / 点击查看」这类互动广告文案
@@ -35,20 +45,24 @@ class SkipAccessibilityService : AccessibilityService() {
 
     private var lastClickAt = 0L
     private var lastWindowAt = 0L
+    private var lastWindowPkg: String? = null
     private var clickedForWindow = false
     private var screenWidth = 1080
     private var screenHeight = 2400
 
-    /** 抢跑任务：窗口出现后高频重试，直到点中或超时 */
+    /** 抢跑任务：窗口出现后逐次退避地重试，直到点中或超出窗口 */
     private val pollTask = object : Runnable {
         override fun run() {
             if (clickedForWindow) return
-            if (SystemClock.elapsedRealtime() - lastWindowAt > POLL_WINDOW_MS) return
-            tryClick(MAX_NODES_POLL)
-            if (!clickedForWindow &&
-                SystemClock.elapsedRealtime() - lastWindowAt <= POLL_WINDOW_MS
-            ) {
-                handler.postDelayed(this, POLL_INTERVAL_MS)
+            val elapsed = SystemClock.elapsedRealtime() - lastWindowAt
+            if (elapsed > POLL_WINDOW_MS) return
+
+            tryClick(MAX_NODES)
+
+            if (clickedForWindow) return
+            val delay = if (elapsed < DENSE_PHASE_MS) DENSE_INTERVAL_MS else SPARSE_INTERVAL_MS
+            if (elapsed + delay <= POLL_WINDOW_MS) {
+                handler.postDelayed(this, delay)
             }
         }
     }
@@ -59,30 +73,39 @@ class SkipAccessibilityService : AccessibilityService() {
         screenWidth = dm.widthPixels
         screenHeight = dm.heightPixels
         serviceInfo = serviceInfo?.apply {
-            eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
-                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+            // 关键：不再监听 TYPE_WINDOW_CONTENT_CHANGED，那是耗电元凶
+            eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
-            notificationTimeout = 60
+            notificationTimeout = 200
             Log.i(TAG, "connected, screen=${screenWidth}x$screenHeight")
         }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+
+        val pkg = event.packageName?.toString() ?: return
+        if (pkg == packageName) return
+
         val now = SystemClock.elapsedRealtime()
 
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            lastWindowAt = now
-            clickedForWindow = false
-            handler.removeCallbacks(pollTask)
-            handler.post(pollTask)
-            return
+        if (pkg == lastWindowPkg) {
+            // 同一 App 内部：已经点过就不再打扰
+            if (clickedForWindow) return
+            // 没点过 —— 若距上次窗口切换还不到一个轮询窗口，说明只是页面内跳转，续上当前这一轮即可
+            if (now - lastWindowAt < SAME_PKG_RESTART_MS) {
+                lastWindowAt = now
+                return
+            }
+            // 间隔足够久，视为这个 App 的又一次启动（如开屏 Activity 与主页 Activity 同包名）
         }
 
-        if (clickedForWindow) return
-        if (now - lastWindowAt > WINDOW_WINDOW_MS) return
-        if (now - lastClickAt < COOLDOWN_MS) return
-        tryClick(MAX_NODES)
+        lastWindowPkg = pkg
+        lastWindowAt = now
+        clickedForWindow = false
+        handler.removeCallbacks(pollTask)
+        handler.post(pollTask)
     }
 
     override fun onInterrupt() = Unit
@@ -94,7 +117,7 @@ class SkipAccessibilityService : AccessibilityService() {
 
     private fun tryClick(maxNodes: Int) {
         val now = SystemClock.elapsedRealtime()
-        if (now - lastWindowAt > WINDOW_WINDOW_MS) return
+        if (now - lastWindowAt > POLL_WINDOW_MS + 200) return
         if (now - lastClickAt < COOLDOWN_MS) return
 
         val root = runCatching { rootInActiveWindow }.getOrNull() ?: return
@@ -171,12 +194,22 @@ class SkipAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "SplashGuardA11y"
-        private const val WINDOW_WINDOW_MS = 6000L
+
+        /** 抢跑总时长：开屏广告的跳过按钮基本都在这段时间内出现 */
+        private const val POLL_WINDOW_MS = 1500L
+        /** 前段密集（跳过按钮刚渲染的高峰期） */
+        private const val DENSE_PHASE_MS = 600L
+        private const val DENSE_INTERVAL_MS = 100L
+        /** 后段稀疏，覆盖异步填充较慢的广告 SDK */
+        private const val SPARSE_INTERVAL_MS = 300L
+        /** 两次点击的最小间隔 */
         private const val COOLDOWN_MS = 2000L
-        private const val POLL_WINDOW_MS = 1400L
-        private const val POLL_INTERVAL_MS = 90L
-        private const val MAX_NODES = 500
-        private const val MAX_NODES_POLL = 260
+        /** 同包名的窗口变化间隔超过这个值，才当作「又一次启动」并重开一轮扫描 */
+        private const val SAME_PKG_RESTART_MS = 1500L
+
+        /** 单次扫描的节点上限：跳过按钮总在树的浅层，150 足够，再大只是白烧 CPU */
+        private const val MAX_NODES = 150
+
         private val WHITESPACE = "\\s".toRegex()
         private val EXACT_LABELS = setOf(
             "跳过", "跳过广告", "关闭广告", "跳过广告5", "skip", "skipad", "skipads", "skipadvert"

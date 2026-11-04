@@ -32,7 +32,6 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 本地 DNS 过滤隧道。
@@ -58,7 +57,27 @@ class SplashGuardVpnService : VpnService() {
     }
 
     private val ownerCache = HashMap<Int, Pair<String?, Long>>()
-    private val blockedSinceNotify = AtomicInteger(0)
+
+    /**
+     * DNS 响应缓存。
+     *
+     * 手机上同一域名会被反复查询（多 SDK 共用 CDN、页面重试、App 切前台），
+     * 每次未命中都要 new DatagramSocket + protect() + 上游往返，代价不小。
+     * 缓存命中直接本地回包，省掉整条链路。
+     */
+    private class CacheEntry(val payload: ByteArray, val expireAt: Long)
+
+    private val cacheLock = Any()
+    private val dnsCache = object : LinkedHashMap<String, CacheEntry>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CacheEntry>?): Boolean =
+            size > MAX_CACHE_ENTRIES
+    }
+
+    @Volatile
+    private var upstreamAddr: InetAddress? = null
+
+    @Volatile
+    private var upstreamAddrFor: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -189,6 +208,7 @@ class SplashGuardVpnService : VpnService() {
         Log.i(TAG, "reader started gen=$gen")
 
         val buf = ByteArray(32767)
+        var zeroStreak = 0
         while (running && gen == generation) {
             val n = try {
                 input.read(buf)
@@ -196,7 +216,22 @@ class SplashGuardVpnService : VpnService() {
                 Log.i(TAG, "reader gen=$gen read stopped: ${e.message}")
                 break
             }
-            if (n <= 0) continue
+            if (n < 0) {
+                Log.i(TAG, "reader gen=$gen EOF, exit")
+                break
+            }
+            if (n == 0) {
+                // 关键：tun 上没有报文时若 read 返回 0，绝不能 continue —— 那会变成 100% 空转，
+                // 表现为「什么都没干却让手机发烫」。这里让出 CPU 并设一个上限，连续空读就退出。
+                zeroStreak++
+                if (zeroStreak > MAX_ZERO_READS) {
+                    Log.w(TAG, "reader gen=$gen zero-read x$MAX_ZERO_READS, exit")
+                    break
+                }
+                runCatching { Thread.sleep(ZERO_READ_BACKOFF_MS) }
+                continue
+            }
+            zeroStreak = 0
             val copy = buf.copyOf(n)
             runCatching { pool.execute { handle(copy) } }
         }
@@ -225,26 +260,59 @@ class SplashGuardVpnService : VpnService() {
         val question = DnsPacket.parseQuestion(payload, payload.size) ?: return
         val rule = RuleStore.match(question.name)
 
-        val responsePayload: ByteArray = if (rule != null) {
-            val mode = prefs.blockMode
-            val resp = DnsPacket.buildBlockResponse(payload, payload.size, mode)
+        if (rule != null) {
+            val resp = DnsPacket.buildBlockResponse(payload, payload.size, prefs.blockMode)
             if (resp.isNotEmpty()) {
                 BlockLog.record(pkgFor(info), question.name, rule)
                 prefs.bumpBlockCount()
-                blockedSinceNotify.incrementAndGet()
-                if (blockedSinceNotify.get() % 5 == 0) {
-                    updateNotification(getString(R.string.notif_running))
-                }
             }
-            resp
-        } else {
-            forward(payload, prefs.upstreamDns) ?: return
+            reply(packet, resp)
+            return
         }
 
+        // 缓存键必须带 qType，否则 AAAA 查询会拿到 A 记录
+        val key = question.name + "|" + question.qType
+        cacheGet(key, DnsPacket.queryId(payload))?.let { cached ->
+            reply(packet, cached)
+            return
+        }
+
+        val resp = forward(payload, prefs.upstreamDns) ?: return
+        cachePut(key, resp)
+        reply(packet, resp)
+    }
+
+    private fun reply(packet: ByteArray, responsePayload: ByteArray) {
         if (responsePayload.isEmpty()) return
         val wrapped = PacketBuilder.wrapUdpResponse(packet, packet.size, responsePayload)
         if (wrapped.isEmpty()) return
         writeToTun(wrapped)
+    }
+
+    // ---------------- DNS 缓存 ----------------
+
+    private fun cacheGet(key: String, queryId: Int): ByteArray? {
+        val e = synchronized(cacheLock) { dnsCache[key] } ?: return null
+        if (SystemClock.elapsedRealtime() > e.expireAt) {
+            synchronized(cacheLock) { dnsCache.remove(key) }
+            return null
+        }
+        // 改回本次查询的 transaction ID —— 复用别人的报文必须换 ID，否则客户端会丢弃
+        val copy = e.payload.copyOf()
+        if (copy.size >= 2) {
+            copy[0] = ((queryId shr 8) and 0xFF).toByte()
+            copy[1] = (queryId and 0xFF).toByte()
+        }
+        return copy
+    }
+
+    private fun cachePut(key: String, response: ByteArray) {
+        // 只缓存干净的肯定应答：错误码 / 空应答 / 超大包都不适合缓存
+        if (response.size < 12 || response.size > MAX_CACHE_PACKET) return
+        if (DnsPacket.rcode(response) != 0) return
+        if (DnsPacket.answerCount(response) < 1) return
+        val entry = CacheEntry(response, SystemClock.elapsedRealtime() + CACHE_TTL_MS)
+        synchronized(cacheLock) { dnsCache[key] = entry }
     }
 
     /** 转发到上游。socket 必须 protect()，否则会再次进入自己的 tun 形成死循环。 */
@@ -253,7 +321,7 @@ class SplashGuardVpnService : VpnService() {
             DatagramSocket().use { socket ->
                 if (!protect(socket)) return null
                 socket.soTimeout = Const.UPSTREAM_TIMEOUT_MS
-                val addr = InetAddress.getByName(upstream)
+                val addr = upstreamAddress(upstream) ?: return null
                 socket.send(DatagramPacket(payload, payload.size, addr, Const.DNS_PORT))
                 val buf = ByteArray(4096)
                 val resp = DatagramPacket(buf, buf.size)
@@ -264,6 +332,16 @@ class SplashGuardVpnService : VpnService() {
             Log.w(TAG, "forward to $upstream failed: ${e.message}")
             null
         }
+    }
+
+    /** 上游地址是 IP 字面量，解析结果不会变，缓存起来避免每条查询都走一次 */
+    private fun upstreamAddress(upstream: String): InetAddress? {
+        val cached = upstreamAddr
+        if (cached != null && upstream == upstreamAddrFor) return cached
+        val addr = runCatching { InetAddress.getByName(upstream) }.getOrNull() ?: return null
+        upstreamAddr = addr
+        upstreamAddrFor = upstream
+        return addr
     }
 
     private fun writeToTun(data: ByteArray) {
@@ -393,6 +471,18 @@ class SplashGuardVpnService : VpnService() {
         private const val REBUILD_DELAY_MS = 350L
         /** establish() 最多重试次数（旧 VPN 会话可能还没被系统回收） */
         private const val MAX_ESTABLISH_RETRY = 3
+
+        /** DNS 缓存条数上限 */
+        private const val MAX_CACHE_ENTRIES = 256
+        /** 缓存存活时间。刻意保守：太长会让 CDN 调度变钝，太短则起不到省电作用 */
+        private const val CACHE_TTL_MS = 45_000L
+        /** 超过这个大小的应答不缓存（多为超长 TXT，命中率低） */
+        private const val MAX_CACHE_PACKET = 1024
+
+        /** tun read 返回 0 时连续空读的上限：超过就认为 fd 已失效，退出读循环 */
+        private const val MAX_ZERO_READS = 200
+        /** 每次空读让出 CPU 的时间 */
+        private const val ZERO_READ_BACKOFF_MS = 10L
 
         @Volatile
         var isRunning: Boolean = false

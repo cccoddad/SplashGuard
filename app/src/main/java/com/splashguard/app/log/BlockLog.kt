@@ -27,6 +27,8 @@ object BlockLog {
 
     private const val FILE_NAME = "recent_blocks.tsv"
     private const val MAX_FILE_LINES = Const.MAX_LOG * 2
+    /** 文件超过这个大小才做一次行数裁剪（一行约 100 字节） */
+    private const val TRIM_THRESHOLD_BYTES = 64 * 1024
 
     private val entries = ArrayList<Entry>(Const.MAX_LOG)
     private val listeners = ArrayList<() -> Unit>()
@@ -109,7 +111,8 @@ object BlockLog {
                     append(e.rule).append('\n')
                 }
                 f.appendText(line)
-                trimIfNeeded(f)
+                // 只在文件明显变大时才检查行数：避免每条日志都读一遍整个文件
+                if (f.length() > TRIM_THRESHOLD_BYTES) trimIfNeeded(f)
             }
         }
     }
