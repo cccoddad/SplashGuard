@@ -1,5 +1,7 @@
 # SplashGuard
 
+[English](README.en.md) | 简体中文
+
 Android 本地开屏广告拦截器。**不 root、不越狱、不上传任何数据。**
 
 调 VPN 只接管 DNS 查询（其他流量不过隧道），让广告域名解析不出来；
