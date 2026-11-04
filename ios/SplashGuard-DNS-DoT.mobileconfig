@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PayloadType</key>
+	<string>Configuration</string>
+	<key>PayloadIdentifier</key>
+	<string>com.splashguard.dns.splashguard-dns--dot.profile</string>
+	<key>PayloadUUID</key>
+	<string>ab704ad5-2dd4-5dee-962d-87d8ced22e3b</string>
+	<key>PayloadDisplayName</key>
+	<string>SplashGuard DNS (DoT)</string>
+	<key>PayloadDescription</key>
+	<string>SplashGuard 提供 · 全部解析在本机发起，SplashGuard 不收集任何数据。</string>
+	<key>PayloadOrganization</key>
+	<string>SplashGuard</string>
+	<key>PayloadVersion</key>
+	<integer>1</integer>
+	<key>PayloadRemovalDisallowed</key>
+	<false/>
+	<key>PayloadContent</key>
+	<array>
+		<dict>
+			<key>PayloadType</key>
+			<string>com.apple.dnsSettings.managed</string>
+			<key>PayloadIdentifier</key>
+			<string>com.splashguard.dns.splashguard-dns--dot</string>
+			<key>PayloadUUID</key>
+			<string>1667fc42-9d8f-5e92-a9f3-48ef0eeea7f7</string>
+			<key>PayloadDisplayName</key>
+			<string>SplashGuard DNS (DoT)</string>
+			<key>PayloadDescription</key>
+			<string>将本设备的 DNS 查询加密转发至指定解析器，用于减少开屏广告与追踪域名解析。</string>
+			<key>PayloadOrganization</key>
+			<string>SplashGuard</string>
+			<key>PayloadVersion</key>
+			<integer>1</integer>
+			<key>DNSProtocol</key>
+			<string>TLS</string>
+			<key>ServerName</key>
+			<string>dns.adguard-dns.com</string>
+			<key>ServerAddresses</key>
+			<array>
+				<string>94.140.14.14</string>
+				<string>94.140.15.15</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

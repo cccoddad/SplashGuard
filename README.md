@@ -95,7 +95,33 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 ---
 
-## 四、目录结构
+## 四、iOS 端（能力上限方案，只有 DNS）
+
+iOS 没有跨 App 的 UI 自动化 API，也没有可自建规则的本地 VPN（Network Extension
+entitlement 个人申请基本被拒），所以**这里不提供 App，只提供一份系统级 DNS 描述文件**。
+详见 [`ios/README.md`](ios/README.md)。
+
+```bash
+python ios/make_profile.py --preset adguard-doh      # 生成 DoH 描述文件
+python ios/make_profile.py --preset adguard-dot      # 生成 DoT 变体
+python ios/make_profile.py --preset nextdns --nextdns-id <ID>
+python ios/check_profile.py                          # 结构校验（无需 Mac/iPhone）
+```
+
+装法：把 `.mobileconfig` AirDrop 到手机 → 设置 → 通用 → VPN 与设备管理 → 安装。
+
+| iOS 能做 | iOS 不能做 |
+|---|---|
+| 全系统 DNS 指向 DoH/DoT 过滤解析器 | 分应用、本地自定义规则、本机拦截日志 |
+| 卸载干净、零耗电、不占 VPN 槽位 | 自动点「跳过」（Shortcuts 看不到别人的界面） |
+| 换自建 DoH 后隐私边界等同 Android | 拦 HTTPDNS / 已缓存素材 / 自绘开屏 |
+
+**覆盖率预期：iOS 明显低于 Android**，因为 Android 上还有无障碍这条第二通道，
+iOS 没有。这是平台边界，不是实现缺陷。
+
+---
+
+## 五、目录结构
 
 ```
 SplashGuard/
@@ -104,8 +130,14 @@ SplashGuard/
 │   ├── feasibility.md         可行性报告（Android/iOS 能力边界）
 │   ├── PRD.md                 用户故事 + 验收标准
 │   ├── tech-design.md         技术方案 + 关键决策
-│   ├── testing.md             测试用例（单元 + 真机）
+│   ├── testing.md             测试用例（单元 + Android 真机 + iOS 描述文件）
 │   └── privacy.md             隐私说明
+├── ios/                       iOS 只有 DNS：描述文件 + 生成器 + 校验脚本
+│   ├── README.md              装法、换服务商、能/不能做什么
+│   ├── make_profile.py        生成 .mobileconfig（UUID 可复现）
+│   ├── check_profile.py       结构校验，无用例依赖，可直接跑
+│   ├── SplashGuard-DNS-DoH.mobileconfig
+│   └── SplashGuard-DNS-DoT.mobileconfig
 ├── app/src/main/
 │   ├── assets/rules/splash_ads.txt   内置广告域名种子库（可改）
 │   ├── java/com/splashguard/app/
@@ -123,7 +155,7 @@ SplashGuard/
 
 ---
 
-## 五、关键决策记录
+## 六、关键决策记录
 
 | # | 决策 | 备选 | 为什么这么选 |
 |---|---|---|---|
@@ -137,10 +169,12 @@ SplashGuard/
 | 8 | `targetSdk = 34` | 35/36 | 侧载场景不需要满足 Play 要求；34 避免被迫处理 edge-to-edge 布局 |
 | 9 | 关掉 R8 混淆 | 开启 | MVP 优先可调试性，崩溃堆栈可读 |
 | 10 | 自签 keystore，侧载分发 | 上架商店 | 广告拦截类在 Play 和国内商店都过不了审，无障碍 API 会被认定滥用 |
+| 11 | iOS **只给描述文件，不做 App** | 做带 NEPacketTunnelProvider 的 iOS App | 该 entitlement 个人申请基本被拒，免费签名 7 天过期，做出来也无法日常用；描述文件是 iOS 唯一稳定可用的路径 |
+| 12 | iOS 描述文件 UUID 用 **uuid5 从标识符派生** | 每次随机 uuid4 | 随机 UUID 会让每次生成的字节都不同，Git diff 全红、也无法核对分发的文件有没有被改 |
 
 ---
 
-## 六、规则怎么加
+## 七、规则怎么加
 
 内置规则在 `app/src/main/assets/rules/splash_ads.txt`，也可以直接在 App 内「设置 →
 自定义规则」里加，保存即热生效，不用重启隧道。
@@ -156,7 +190,7 @@ example.com          # 命中 example.com 和 a.b.example.com
 
 ---
 
-## 七、已知问题
+## 八、已知问题
 
 1. **HTTPDNS 绕过**：国内大厂 App 用阿里云/腾讯 HTTPDNS，DNS 层完全无效。
    这不是 bug，是协议层面的硬限制，只能靠无障碍通道补。
@@ -168,12 +202,12 @@ example.com          # 命中 example.com 和 a.b.example.com
 
 ---
 
-## 八、隐私
+## 九、隐私
 
 不收集、不上传、不统计。唯一出站流量是未拦截域名的 DNS 转发（发往你自己配的上游）。
 详见 [docs/privacy.md](docs/privacy.md)。
 
-## 九、路线图
+## 十、路线图
 
 - [ ] v0.2 按 App 统计拦截命中率，辅助判断该不该给某个 App 开
 - [ ] v0.3 规则分组开关（穿山甲 / 优量汇 / 快手 分开控制）

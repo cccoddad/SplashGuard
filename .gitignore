@@ -13,3 +13,5 @@ keystore.properties
 keystore/
 build.log
 test.log
+__pycache__/
+*.pyc

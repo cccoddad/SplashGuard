@@ -103,7 +103,43 @@
 1. 用 PCAPdroid 抓本机流量，筛选 UID = SplashGuard
 2. ✅ 只有 UDP:53 出站，无 HTTP/HTTPS 出站
 
-## 三、回归清单（每次改规则库后跑）
+## 三、iOS 描述文件验收（需 iPhone）
+
+> 前提：`python ios/make_profile.py --preset adguard-doh` 生成文件，按 `ios/README.md` 安装。
+> 本机无 iPhone，以下均为**待你执行**的步骤，不是已完成项。
+
+### I-01 结构校验（无需手机，可立刻跑）
+1. `python ios/check_profile.py ios/*.mobileconfig`
+2. ✅ 全部 `[ OK ]`，退出码 0
+3. 故意改坏一个字段（如 `DNSProtocol=QUIC`）再跑
+4. ✅ 脚本报 FAIL 并退出码 1（已实测通过）
+
+### I-02 安装成功
+1. AirDrop 把 `.mobileconfig` 传到 iPhone → 设置 → 通用 → VPN 与设备管理
+2. 点「安装」→ 输密码 → 再确认
+3. ✅ 列表中出现 `SplashGuard DNS (DoH)`，无"未验证"报错中断
+
+### I-03 生效验证
+1. Safari 打开 `https://adguard-dns.io/zh_cn/test.html`
+2. ✅ "广告拦截"项为通过（绿色）
+3. `https://dnsleaktest.com` 跑 extended test
+4. ✅ 解析器归属变为对应服务商，而非本地运营商
+
+### I-04 真实开屏效果
+1. 记录装描述文件**之前** 3 个目标 App 的冷启动表现（是否有 3–5s 开屏）
+2. 装上后，每个 App 强制停止（上滑关闭）再冷启动，各 3 次
+3. ✅ 记为：完全无广告 / 有兜底页但可立即跳过 / 无变化 —— 分 App 记录
+4. ⚠️ HTTPDNS 或素材预缓存的 App 预期"无变化"，这是已知边界
+
+### I-05 卸载还原
+1. 设置 → 通用 → VPN 与设备管理 → 移除描述文件
+2. ✅ 解析器恢复为运营商 DNS（dnsleaktest 复核）
+
+### I-06 与代理类 App 共存
+1. 开启任意 VPN/代理 App 后再测 I-03
+2. ✅ 记录 DNS 是否被代理接管（可能被覆盖，属预期行为）
+
+## 四、回归清单（每次改规则库后跑）
 
 - [ ] `./gradlew test` 全绿
 - [ ] 规则行数变化记录在 CHANGELOG

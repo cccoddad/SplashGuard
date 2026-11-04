@@ -63,6 +63,10 @@
 
 **因此 iOS 交付的只能是「DNS 描述文件 + 明确的局限说明」，不承诺系统级拦截。**
 
+> 已交付：`ios/SplashGuard-DNS-DoH.mobileconfig` / `-DoT.mobileconfig`，
+> 生成器 `ios/make_profile.py`，校验脚本 `ios/check_profile.py`，
+> 装法与能力边界见 `ios/README.md`。
+
 ## 5. 为什么普通插件 / 小程序根本不可能做到
 
 1. **进程隔离**：Android 每个 App 独立 UID + SELinux 沙盒，iOS 每个 App 独立沙盒。第三方代码既读不到别人的网络包，也读不到别人的界面。
