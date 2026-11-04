@@ -1,0 +1,30 @@
+---
+description: SplashGuard core constraints, architecture red lines, and verification rules
+alwaysApply: true
+---
+
+# SplashGuard Rules
+
+Read `AGENTS.md` at the repository root first. It is the single source of truth.
+
+Hard constraints:
+
+- No root, jailbreak, Xposed, or LSPosed. Public Android APIs only.
+- No server, account, analytics, crash reporting, or remote config. Only DNS forwarding leaves the device.
+- No HTTPS MITM, no URL-path filtering, and never click the ad itself.
+- Keep the APK under 8 MB; do not add Room, Retrofit, or other heavy dependencies.
+- Every claim needs reproducible evidence. Mark unverified work as "未验证".
+
+Architecture red lines:
+
+- `VpnService` routes DNS targets only. Never turn it into a global VPN or proxy.
+- Accessibility is optional and default off. Only small "Skip / Close ad" controls may be clicked;
+  both the label node and the final clickable node must pass the size gate.
+- Do not listen to `TYPE_WINDOW_CONTENT_CHANGED`.
+- iOS ships DNS configuration profiles only. No `NEPacketTunnelProvider` app.
+- No database. Storage is assets rules, SharedPreferences, and memory + TSV logs.
+- Keep DNS packet, packet building, and rule matching pure Kotlin and JVM-testable.
+
+Before coding: state what you will change, why, and the expected result.
+Before finishing: run `./gradlew test`, the 7 accessibility scenarios, and one real cold start
+for behavior changes. Never claim "fixed" without verification.
