@@ -10,7 +10,6 @@ import com.splashguard.app.R
 import com.splashguard.app.core.BlockMode
 import com.splashguard.app.core.Prefs
 import com.splashguard.app.databinding.ActivitySettingsBinding
-import com.splashguard.app.net.SplashGuardVpnService
 import com.splashguard.app.rules.RuleStore
 
 class SettingsActivity : AppCompatActivity() {
@@ -71,7 +70,8 @@ class SettingsActivity : AppCompatActivity() {
         RuleStore.reload(this)
 
         toast(getString(R.string.toast_saved, RuleStore.ruleCount))
-        SplashGuardVpnService.restart(this)
+        // 拦截模式 / 上游 DNS / 自定义规则都是每次请求实时读取的，
+        // 不需要重建隧道（重建会短暂断开全系统 DNS，得不偿失）。
     }
 
     private fun openPrivateDnsSettings() {

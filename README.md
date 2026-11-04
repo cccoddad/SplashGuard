@@ -131,7 +131,10 @@ SplashGuard/
 │   ├── PRD.md                 用户故事 + 验收标准
 │   ├── tech-design.md         技术方案 + 关键决策
 │   ├── testing.md             测试用例（单元 + Android 真机 + iOS 描述文件）
+│   ├── acceptance-emulator.md 模拟器验收报告（A–H 全项 + 4 个缺陷修复记录）
+│   ├── evidence/              验收证据：截图、UI 树、内存快照
 │   └── privacy.md             隐私说明
+├── splashtest/                验收用「假开屏」App（5 种界面，验无障碍点击与防误点）
 ├── ios/                       iOS 只有 DNS：描述文件 + 生成器 + 校验脚本
 │   ├── README.md              装法、换服务商、能/不能做什么
 │   ├── make_profile.py        生成 .mobileconfig（UUID 可复现）
@@ -199,6 +202,13 @@ example.com          # 命中 example.com 和 a.b.example.com
 3. **同时只能有一个 VPN**：开启本应用会顶掉其他 VPN 应用（系统限制）。
 4. **日志里的「未知应用」**：`getConnectionOwnerUid` 在部分机型上拿不到归属，
    显示为未知，不影响拦截本身。
+5. **重启后可能丢 VPN 授权**：部分系统/机型重启后会把 VPN 授权重置。此时不会静默失败，
+   而是发一条「拦截没有自动恢复」的通知，点一下即可重新授权。
+6. **模拟器上 0.0.0.0 显示为 127.0.0.1**：这是 Android 解析层把 0.0.0.0 当归环处理，
+   效果是连接快速失败（比 NXDOMAIN 更快），符合预期。
+
+> 模拟器验收（API 26 / API 34，A–H 全项）见 [docs/acceptance-emulator.md](docs/acceptance-emulator.md)，
+> 其中修复了 1 个 P0（隧道重启后 DNS 全断）、2 个 P1（分应用死锁、开机静默失败）。
 
 ---
 

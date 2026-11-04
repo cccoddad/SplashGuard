@@ -45,6 +45,8 @@ class SplashGuardVpnService : VpnService() {
 
     @Volatile
     private var running = false
+    /** 每次重建隧道递增，旧读循环据此自行退出，避免新旧两个 reader 抢同一个 tun */
+    private var generation = 0
     private var tun: ParcelFileDescriptor? = null
     private var worker: Thread? = null
     private var outStream: FileOutputStream? = null
@@ -66,6 +68,7 @@ class SplashGuardVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.i(TAG, "onStartCommand action=${intent?.action} startId=$startId running=$running")
         return when (intent?.action) {
             Const.ACTION_STOP -> {
                 stopVpn()
@@ -73,9 +76,10 @@ class SplashGuardVpnService : VpnService() {
                 START_NOT_STICKY
             }
             Const.ACTION_RESTART -> {
-                // 分应用 / 拦截模式变了，需要重建隧道
-                stopVpn()
-                startVpn()
+                // 分应用 / 拦截模式变了：先拆旧隧道，稍等系统回收后再建新的。
+                // 立刻 establish() 会撞上"旧会话还没拆完"，所以给个退避 + 重试。
+                stopVpn(keepForeground = true)
+                mainHandler.postDelayed({ startVpn() }, REBUILD_DELAY_MS)
                 START_STICKY
             }
             else -> {
@@ -85,11 +89,14 @@ class SplashGuardVpnService : VpnService() {
         }
     }
 
-    private fun startVpn() {
+    private fun startVpn(attempt: Int = 0) {
+        Log.i(TAG, "startVpn enter, running=$running gen=$generation attempt=$attempt")
         if (running) return
 
         // 通知必须尽早发出，避免 startForegroundService 5 秒超时
-        startForeground(Const.NOTIF_ID, buildNotification(getString(R.string.notif_starting)))
+        if (attempt == 0) {
+            startForeground(Const.NOTIF_ID, buildNotification(getString(R.string.notif_starting)))
+        }
 
         if (prepare(this) != null) {
             // 需要用户交互，服务里没法弹授权框
@@ -101,7 +108,13 @@ class SplashGuardVpnService : VpnService() {
 
         val fd = buildTun()
         if (fd == null) {
-            Log.e(TAG, "establish() returned null")
+            if (attempt < MAX_ESTABLISH_RETRY) {
+                // 刚拆掉的旧会话可能还没被系统回收，退避后重试
+                Log.w(TAG, "establish() returned null, retry ${attempt + 1}/$MAX_ESTABLISH_RETRY")
+                mainHandler.postDelayed({ startVpn(attempt + 1) }, REBUILD_DELAY_MS)
+                return
+            }
+            Log.e(TAG, "establish() returned null after retries, abort")
             prefs.enabled = false
             updateNotification(getString(R.string.notif_failed))
             stopSelf()
@@ -113,7 +126,9 @@ class SplashGuardVpnService : VpnService() {
         isRunning = true
         prefs.enabled = true
 
-        worker = Thread({ loop(fd) }, "tun-reader").apply {
+        val gen = ++generation
+        Log.i(TAG, "tunnel up, gen=$gen fd=${fd.fd}")
+        worker = Thread({ loop(fd, gen) }, "tun-reader-$gen").apply {
             isDaemon = true
             start()
         }
@@ -155,22 +170,50 @@ class SplashGuardVpnService : VpnService() {
         }
     }
 
-    private fun loop(fd: ParcelFileDescriptor) {
-        val input = FileInputStream(fd.fileDescriptor)
-        outStream = FileOutputStream(fd.fileDescriptor)
+    private fun loop(fd: ParcelFileDescriptor, gen: Int) {
+        val input = try {
+            FileInputStream(fd.fileDescriptor)
+        } catch (e: Exception) {
+            Log.e(TAG, "reader gen=$gen cannot open stream: ${e.message}")
+            onReaderDead(gen)
+            return
+        }
+        val out = try {
+            FileOutputStream(fd.fileDescriptor)
+        } catch (e: Exception) {
+            Log.e(TAG, "reader gen=$gen cannot open output: ${e.message}")
+            onReaderDead(gen)
+            return
+        }
+        synchronized(writeLock) { if (gen == generation) outStream = out }
+        Log.i(TAG, "reader started gen=$gen")
+
         val buf = ByteArray(32767)
-        while (running) {
+        while (running && gen == generation) {
             val n = try {
                 input.read(buf)
             } catch (e: IOException) {
-                if (running) Log.w(TAG, "tun read failed: ${e.message}")
+                Log.i(TAG, "reader gen=$gen read stopped: ${e.message}")
                 break
             }
             if (n <= 0) continue
             val copy = buf.copyOf(n)
             runCatching { pool.execute { handle(copy) } }
         }
-        Log.i(TAG, "read loop exited")
+        Log.i(TAG, "reader exit gen=$gen (running=$running, cur=$generation)")
+        onReaderDead(gen)
+    }
+
+    /**
+     * 读循环意外退出时的兜底：隧道网络还在、却没人读 = 全系统 DNS 黑洞（表现为断网）。
+     * 这里主动拆掉隧道，让系统回落到物理网络的 DNS，宁可"不拦"也不能"断网"。
+     */
+    private fun onReaderDead(gen: Int) {
+        if (gen != generation) return       // 正常重启换代的退出，忽略
+        if (!running) return                // 主动停止，忽略
+        Log.e(TAG, "reader gen=$gen died unexpectedly, tearing down tunnel to avoid DNS blackhole")
+        stopVpn()
+        stopSelf()
     }
 
     private fun handle(packet: ByteArray) {
@@ -264,19 +307,23 @@ class SplashGuardVpnService : VpnService() {
         return pkg
     }
 
-    private fun stopVpn() {
+    private fun stopVpn(keepForeground: Boolean = false) {
+        // 先让旧读循环失效，再关 fd 解除阻塞，最后等它退出，避免新旧 reader 同时抓着 tun
+        generation++
         running = false
         isRunning = false
         prefs.enabled = false
-        runCatching { worker?.interrupt() }
-        worker = null
         runCatching { tun?.close() }
+        runCatching { worker?.join(500) }
+        worker = null
         tun = null
-        runCatching { outStream?.close() }
-        outStream = null
-        runCatching { stopForeground(Service.STOP_FOREGROUND_REMOVE) }
+        synchronized(writeLock) {
+            runCatching { outStream?.close() }
+            outStream = null
+        }
+        if (!keepForeground) runCatching { stopForeground(Service.STOP_FOREGROUND_REMOVE) }
         notifyState()
-        Log.i(TAG, "stopped")
+        Log.i(TAG, "stopped, gen=$generation keepFg=$keepForeground")
     }
 
     override fun onRevoke() {
@@ -341,6 +388,11 @@ class SplashGuardVpnService : VpnService() {
 
     companion object {
         private const val TAG = "SplashGuardVpn"
+
+        /** 拆旧隧道到建新隧道之间的退避时间 */
+        private const val REBUILD_DELAY_MS = 350L
+        /** establish() 最多重试次数（旧 VPN 会话可能还没被系统回收） */
+        private const val MAX_ESTABLISH_RETRY = 3
 
         @Volatile
         var isRunning: Boolean = false

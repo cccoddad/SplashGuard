@@ -11,6 +11,9 @@
 
     <string name="notif_channel">拦截运行状态</string>
     <string name="notif_channel_desc">显示 DNS 过滤是否正在运行</string>
+    <string name="notif_alert_channel">需要处理</string>
+    <string name="boot_need_auth_title">拦截没有自动恢复</string>
+    <string name="boot_need_auth_body">系统撤销了 VPN 授权，点此重新开启拦截</string>
     <string name="notif_starting">正在启动…</string>
     <string name="notif_running">正在拦截开屏广告</string>
     <string name="notif_failed">启动失败：请重新授权 VPN</string>
@@ -71,6 +74,7 @@
     <string name="apps_hint_selected">只有勾选的 App 经过过滤，其他 App 完全不受影响</string>
     <string name="apps_empty_selection">至少要勾选一个应用</string>
     <string name="apps_need_mode">请先切换到「仅选中的应用」</string>
+    <string name="apps_staged">已选 %1$d 个应用，切到「仅选中的应用」后生效</string>
     <string name="apps_loading">正在读取应用列表…</string>
     <string name="apps_unknown">未知应用</string>
     <string name="apps_restart_hint">配置已更新，隧道正在重启</string>

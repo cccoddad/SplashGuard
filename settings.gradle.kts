@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "SplashGuard"
 include(":app")
+include(":splashtest")   // 验收用的假开屏 App，不参与分发

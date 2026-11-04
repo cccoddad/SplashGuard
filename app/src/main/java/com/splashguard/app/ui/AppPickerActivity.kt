@@ -82,21 +82,23 @@ class AppPickerActivity : AppCompatActivity() {
     }
 
     private fun onToggle(entry: AppEntry, checked: Boolean): Boolean {
-        if (prefs.perAppMode != PerAppMode.ONLY_SELECTED) {
-            toast(getString(R.string.apps_need_mode))
-            return false
-        }
+        // 允许先勾选、再切模式（否则「没选过就不能切模式、没切模式又不能选」会锁死）
         val next = prefs.selectedApps.toMutableSet()
         if (checked) {
             next.add(entry.pkg)
         } else {
             next.remove(entry.pkg)
-            if (next.isEmpty()) {
+            if (next.isEmpty() && prefs.perAppMode == PerAppMode.ONLY_SELECTED) {
                 toast(getString(R.string.apps_empty_selection))
                 return false
             }
         }
         prefs.selectedApps = next
+
+        if (prefs.perAppMode != PerAppMode.ONLY_SELECTED) {
+            toast(getString(R.string.apps_staged, next.size))
+            return true
+        }
         restartIfRunning()
         return true
     }

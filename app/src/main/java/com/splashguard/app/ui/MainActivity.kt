@@ -49,7 +49,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val logListener: () -> Unit = {
-        runOnUiThread { refreshLog() }
+        runOnUiThread {
+            // 除了列表，计数也要跟着走 —— 否则拦截发生时首页一直显示 0
+            b.tvToday.text = prefs.todayCount().toString()
+            refreshLog()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
