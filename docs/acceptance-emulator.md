@@ -402,3 +402,35 @@ done
 - 空闲 10 秒：App 进程 utime+stime 增量 = 0 ticks。
 - 单元测试 40 项全绿（新增文案匹配 6 项、窗口状态机 7 项）。
 - **真机（小米 13 Pro / Android 16）仍待安装 v0.1.6 后确认。**
+
+---
+
+## 9. v0.1.7 真机反馈回归（2026-11-04，API 34 模拟器）
+
+**背景**：真机反馈 VPN 空闲自关、懂球帝不跳过但日志有拦截、摇一摇无效、扫描卡顿、无广告时进软件慢。
+
+| 验证项 | 结果 |
+|---|---|
+| `tun.read()==0` 空闲 | VPN 开启后空闲保持 >60 秒不自动关闭 |
+| 空闲 CPU（VPN+a11y 开启） | 10 秒 utime+stime 增量 6 ticks（v0.1.6 为 30） |
+| 无障碍 10 场景 | `skip` / `skipcount` / `delay` / `late` / `deep` / `shake` 点中；`huge` / `other` / `ad` / `nonclick` 不点 |
+| `nonclick`（文字不可点、父容器满屏） | 无 `CLICKED`，未点整块广告 |
+| 扫描成本 | 55→37 次，平均 115→78ms，最近一次 2ms（模拟器） |
+| 拦截应答缓存 | 直接发两次 `pangle.io` A 查询：`拦截应答: 2 / 缓存命中: 1`，第二次无新日志 |
+| 转发缓冲 | 4096→65535 |
+| 单测 | 40 项全绿 |
+
+**复现命令**（10 场景，同一测试包间隔 >6 秒）：
+
+```bash
+for v in skip skipcount delay late deep nonclick shake huge other ad; do
+  adb logcat -c
+  adb shell am force-stop com.splashguard.splashtest
+  adb shell am start -n com.splashguard.splashtest/.FakeSplashActivity --es variant $v
+  sleep 7.5
+  adb logcat -d -s FakeSplash:V | grep "CLICKED:"
+  adb shell am force-stop com.splashguard.splashtest
+done
+```
+
+**真机待验证**：小米 13 Pro / Android 16 上的 VPN 空闲自关、懂球帝扫描/点击、开屏进入速度。

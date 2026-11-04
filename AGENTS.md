@@ -64,7 +64,7 @@ DNS 层：VpnService 只接管 DNS（虚拟 DNS + 常见公共 DNS 的 /32）
 
 ### 当前优先修复（来自 `docs/project-review.md`）
 
-> v0.1.6 已先处理「更新后无障碍全部失效」与「系统无障碍按钮」；以下 DNS / 规则项仍待办。
+> v0.1.7 已处理「VPN 空闲自关、扫描卡顿、DNS 可观测」；以下 DNS / 规则项仍待办。
 
 1. 常见公共 DNS 的 `/32` 路由会黑洞非 DNS 流量：移除，或实现完整 UDP/TCP 转发。
 2. TCP 53 与 4 KB 响应缓冲：补 TCP 处理 / 65535 缓冲 / TC 位 / TTL 感知缓存。
@@ -79,9 +79,10 @@ DNS 层：VpnService 只接管 DNS（虚拟 DNS + 常见公共 DNS 的 /32）
 2. **先定位再修**：读日志、读代码、复现问题；禁止“试试看”。
 3. **每一步给可验证结果**：命令、输出、截图、logcat 至少给一样。
 4. **改完必须回归**：
-   - `./gradlew test`（v0.1.6 为 40 项单测，后续继续增加）
-   - 无障碍 9 场景：`skip` / `skipcount` / `delay` / `late` / `deep` 点中；`huge` / `other` / `ad` 不点；`shake` 只点跳过
+   - `./gradlew test`（v0.1.7 为 40 项单测，后续继续增加）
+   - 无障碍 10 场景：`skip` / `skipcount` / `delay` / `late` / `deep` 点中；`huge` / `other` / `ad` / `nonclick` 不点；`shake` 只点跳过
      （同一测试包连续启动需间隔 >6 秒，否则会被窗口状态机判为同一窗口）
+     （`nonclick` 验证「文字不可点、父容器满屏」时宁可不点，不能点广告本体）
    - 一次真实冷启动；性能改动还要测**完全空闲**状态
 5. **没验证不能说“已修复”**。可以说“改好了，但还没在真机验证”。
 6. **改版本号时**同步 `CHANGELOG.md`、`docs/real-device-guide.md`、README。
@@ -101,7 +102,9 @@ DNS 层：VpnService 只接管 DNS（虚拟 DNS + 常见公共 DNS 的 /32）
 
 ## 7. 已知坑（不要重犯）
 
-1. `tun.read()` 返回 0 时**不能 `continue`**，必须让出 CPU 并计数；否则空闲时烧满一个核。
+1. `tun.read()` 返回 0 时**不能 `continue`**（满速空转烧核），**也不能连续空读就拆隧道**
+   （v0.1.5 因此让 VPN 空闲约 2 秒自己关）。必须让出 CPU（v0.1.7 为 50ms）并周期性检查
+   fd 是否仍有效；有效就继续等，无效才退出。否则空闲时烧满一个核。
 2. `<application>` 必须声明 `android:name=".App"`，否则 `Application.onCreate` 是死代码。
 3. 无障碍向上找可点击父节点时，**父节点也要过尺寸闸**，否则会点掉整块广告跳落地页。
 4. 无障碍不要监听 `TYPE_WINDOW_CONTENT_CHANGED`；滚动/视频/打字会触发全树遍历。

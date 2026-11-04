@@ -127,8 +127,11 @@ clickableAncestor(node, maxDepth = 8)?.performAction(ACTION_CLICK)
 
 - **触发**：只监听 `TYPE_WINDOW_STATE_CHANGED` 和 `TYPE_WINDOWS_CHANGED`；
   **不监听** `TYPE_WINDOW_CONTENT_CHANGED`（旧版全树遍历导致发烫，AGENTS.md 红线）。
-- **轮询**：窗口出现后 6 秒内，0–600ms 每 100ms、600–2000ms 每 250ms、之后每 800ms；
-  点到即停。晚于 1.5 秒出现的按钮由这段轮询覆盖。
+- **轮询**：窗口出现后 6 秒内，首扫延后 150ms；0–600ms 每 250ms、600–3000ms 每 700ms、
+  之后每 1500ms；点到即停。晚于 1.5 秒出现的按钮由这段轮询覆盖。
+- **扫描**：先做 150 节点 BFS；只有 BFS 被截断（树更深）才在 600ms 后做文本深查，
+  且每 1.5 秒最多一次；缓存当前窗口根节点，用 `refresh()` 复用，减少 `rootInActiveWindow` IPC。
+- **不做坐标盲点**：文字节点不可点、祖先又是满屏广告容器时，宁可不点，不能点广告本体。
 - **同包名**：1.5 秒内的窗口事件会**重启轮询**（v0.1.5 只刷新时间，是漏点根因之一）。
 - **更新后修复**：覆盖安装后服务可能「已授权但未绑定」，`A11yController.repairBinding()`
   移除再重新加入；打开 App 时自动尝试一次。

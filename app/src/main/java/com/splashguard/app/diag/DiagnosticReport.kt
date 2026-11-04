@@ -10,6 +10,7 @@ import com.splashguard.app.a11y.A11yState
 import com.splashguard.app.core.BlockMode
 import com.splashguard.app.core.Prefs
 import com.splashguard.app.log.BlockLog
+import com.splashguard.app.net.DnsStats
 import com.splashguard.app.net.SplashGuardVpnService
 import com.splashguard.app.rules.RuleStore
 import java.io.File
@@ -80,6 +81,13 @@ object DiagnosticReport {
         sb.appendLine("开机自启: ${yesNo(prefs.bootStart)}")
         sb.appendLine()
 
+        // ---- DNS 性能 ----
+        sb.appendLine("[DNS 性能]（本次进程启动以来）")
+        sb.appendLine("转发次数: ${DnsStats.forwardCount} / 失败: ${DnsStats.forwardFailures}")
+        sb.appendLine("平均转发耗时: ${DnsStats.avgForwardMs()}ms / 最近: ${DnsStats.lastForwardMs}ms")
+        sb.appendLine("拦截应答: ${DnsStats.blockTotal} / 缓存命中: ${DnsStats.blockCacheHits}")
+        sb.appendLine()
+
         // ---- 规则 ----
         sb.appendLine("[规则]")
         sb.appendLine("生效规则总数: ${RuleStore.ruleCount}")
@@ -116,7 +124,8 @@ object DiagnosticReport {
         )
         sb.appendLine(
             "最近扫描: ${formatWall(A11yState.lastScanAt)} / " +
-                "visited=${A11yState.lastScanVisited} / found=${A11yState.lastScanFound}"
+                "visited=${A11yState.lastScanVisited} / found=${A11yState.lastScanFound} / " +
+                "耗时=${A11yState.lastScanMs}ms（平均 ${A11yState.avgScanMs()}ms）"
         )
         sb.appendLine("最近点击: ${formatWall(A11yState.lastClickAt)} / ${A11yState.lastClickPkg ?: "-"}")
         sb.appendLine("事件/扫描/点击: ${A11yState.eventCount} / ${A11yState.scanCount} / ${A11yState.clickCount}")

@@ -13,7 +13,7 @@
 **SplashGuard** —— 一个只在本地运行的安卓开屏广告拦截器。
 
 - 项目路径：`D:\vs-document\SplashGuard`（Git 已初始化，`git log --oneline` 可看完整提交历史）
-- 当前版本：`0.1.6`（versionCode 6），APK 4.8 MB，包名 `com.splashguard.app`
+- 当前版本：`0.1.7`（versionCode 7），APK 4.8 MB，包名 `com.splashguard.app`
 - 技术栈：Kotlin + Gradle 8.14.3 + AGP 8.10.1，minSdk 26 / targetSdk 34 / compileSdk 36
 - 用户设备：**小米 13 Pro（HyperOS）**
 
@@ -35,16 +35,17 @@
 5. **保持轻量**：APK 不要超过 8 MB，不引入 Room / Retrofit / 协程全家桶这类重型依赖。
    这个 App 的卖点是"小而干净"。
 
-## 三、代码地图（21 个 Kotlin 文件，全部在 `app/src/main/java/com/splashguard/app/`）
+## 三、代码地图（22 个 Kotlin 文件，全部在 `app/src/main/java/com/splashguard/app/`）
 
 | 文件 | 职责 |
 |---|---|
 | `net/SplashGuardVpnService.kt` | 隧道核心：建 tun、读循环、DNS 分发、缓存、分应用、前台通知 |
 | `net/DnsPacket.kt` | 纯函数 DNS 报文解析/构造（无 Android 依赖，可单测） |
 | `net/PacketBuilder.kt` | 手工拼 IPv4 + UDP 头，回写 tun |
+| `net/DnsStats.kt` | DNS 转发/失败/耗时/拦截缓存命中的内存统计（诊断报告用） |
 | `rules/DomainMatcher.kt` | HashSet 后缀匹配（写 `example.com` 命中 `a.b.example.com`，不命中 `notexample.com`） |
 | `rules/RuleStore.kt` | 内置规则（assets）+ 用户自定义规则的合并与热加载 |
-| `a11y/SkipAccessibilityService.kt` | 无障碍自动点「跳过」：STATE/WINDOWS 事件 + 6 秒轮询 + 防误点尺寸闸 |
+| `a11y/SkipAccessibilityService.kt` | 无障碍自动点「跳过」：STATE/WINDOWS 事件 + 6 秒轮询 + 150 节点 BFS + 防误点尺寸闸 |
 | `a11y/SkipLabelMatcher.kt` | 纯函数「跳过」文案匹配，含「跳过 5s / Skip in 5s」倒计时变体（可单测） |
 | `a11y/SkipWindowTracker.kt` | 纯函数窗口状态机：新窗口 / 同包名重启轮询 / 点击冷却（可单测） |
 | `a11y/A11yState.kt` | 无障碍运行态与最近事件（首页「开/未连接」、诊断报告用） |
@@ -68,11 +69,14 @@
 - DNS 分流：打开网页时 tun0 只 +91B，物理网卡 +162KB —— 证明非 DNS 流量确实没过隧道
 - 规则：命中 / 子域命中 / 父域不误杀 / 大小写不敏感 / 自定义规则热生效
 - 分应用：`dumpsys connectivity` 确认 `Uids: <{10148-10148}>` 生效
-- 无障碍 9 个场景全对：`skip` / `skipcount` / `delay`（600ms）/ `late`（2500ms）/ `deep`（6 层容器）点中，
-  `huge`（全宽按钮）/ `other`（"关闭"文案）/ `ad`（整块广告）不点，
+- 无障碍 10 个场景全对：`skip` / `skipcount` / `delay`（600ms）/ `late`（2500ms）/ `deep`（6 层容器）点中，
+  `huge`（全宽按钮）/ `other`（"关闭"文案）/ `ad`（整块广告）/ `nonclick`（文字不可点、父容器满屏）不点，
   `shake`（"摇一摇"与"跳过"并存）只点跳过
 - v0.1.6 修复「更新 App 后所有 App 都不跳过」：STATE|WINDOWS 双事件 + 6 秒轮询 + 更新后自动重新绑定；
   首页显示「自动跳过 · 开 / 未连接」，诊断报告含连接状态与最近事件/扫描/点击
+- v0.1.7 修复「VPN 开一会儿自己关」：`tun.read()` 返回 0 不再 2 秒拆隧道，只做 fd 有效性检查；
+  空读退避 10→50ms，空闲 10 秒 CPU 30→6 ticks；扫描 55→37 次、平均 115→78ms；
+  新增拦截应答缓存（60 秒）与 DNS 转发耗时统计
 - 一键隐藏系统「无障碍快捷方式」按钮（不是本 App 的悬浮窗），关掉后自动跳过不受影响
 - 单测 40 项全绿（DNS 报文 10 / 封包 5 / 规则 12 / 文案匹配 6 / 窗口状态机 7）
 - 修过的 P0：`tun-reader` 读循环空转，空闲时烧满一个核（详见第六节）
@@ -127,10 +131,10 @@
 
 这些都是真实发生过的 bug，每一条都花了时间定位：
 
-1. **`if (n <= 0) continue` 让读循环空转**（最严重）
-   tun 空闲时 `read` 返回 0，`continue` 变成满速死循环，**一个核心 100% 满载**，
-   表现为手机发烫、卡顿、耗电统计 31%。
-   修法：`n<0` 立即退出；`n==0` 让出 CPU（sleep 10ms）并计数，连续 200 次才判定 fd 失效。
+1. `tun.read()` 返回 0 时**不能 `continue`**（会满速空转、烧满一个核），
+   **也不能因为连续空读就拆隧道**（v0.1.5 因此让 VPN 空闲约 2 秒自己关）。
+   正确做法：让出 CPU（v0.1.7 为 50ms）并周期性检查 fd 是否仍有效；有效就继续等，无效才退出。
+   修法：`n<0` 立即退出；`n==0` 让出 CPU 并计数，累积到阈值后检查 fd，不直接 break。
    **教训：性能问题必须测「完全空闲」状态，只测有流量时看不出来。**
 
 2. **`<application>` 没写 `android:name=".App"`**
@@ -192,7 +196,7 @@
    - 分流是否干净：对比 `/sys/class/net/tun0/statistics/rx_bytes` 与物理网卡
    - CPU 谁在烧：逐线程读 `/proc/<pid>/task/*/stat`
    - 无障碍是否点击：假开屏 App `splashtest/` 会往 logcat 写 `FakeSplash:CLICKED:<variant>`
-4. **改完必须回归**：单测 + 无障碍 9 场景 + 一次真实冷启动。省电优化尤其要测空闲态。
+4. **改完必须回归**：单测 + 无障碍 10 场景 + 一次真实冷启动。省电优化尤其要测空闲态。
 5. **不要在没验证的情况下说"已修复"**。宁可说"改好了但还没在真机验证"。
 
 ## 九、构建与交付
@@ -216,7 +220,7 @@ dist/SplashGuard-<版本>.apk     # 同时复制一份到桌面，并压一个 z
 
 接手后不要急着写代码，按顺序：
 
-1. **读** `docs/real-device-guide.md`、`docs/tech-design.md`、`CHANGELOG.md`（尤其 v0.1.6），
+1. **读** `docs/real-device-guide.md`、`docs/tech-design.md`、`CHANGELOG.md`（尤其 v0.1.7），
    再读上面列的 5 个核心文件：`SplashGuardVpnService.kt`、`SkipAccessibilityService.kt`、
    `DnsPacket.kt`、`RuleStore.kt`、`DiagnosticReport.kt`。
 2. **跑一遍** `gradle test assembleRelease`，确认构建和 40 项单测在你手上是绿的。

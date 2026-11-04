@@ -35,12 +35,12 @@
     <string name="status_hint_off">打开开关开始拦截</string>
     <string name="label_enable">拦截开关</string>
 
-    <string name="stat_today">今日拦截</string>
+    <string name="stat_today">今日 DNS 拦截</string>
     <string name="stat_rules">生效规则</string>
     <string name="stat_today_skip">今日跳过</string>
 
-    <string name="section_recent">最近拦截</string>
-    <string name="recent_empty">还没有拦截记录。\n开启后随便打开一个 App 试试。</string>
+    <string name="section_recent">最近 DNS 拦截</string>
+    <string name="recent_empty">还没有 DNS 拦截记录。\nDNS 拦截广告请求域名，不代表开屏一定消失；自动跳过看上方「今日跳过」。</string>
 
     <string name="nav_apps">分应用</string>
     <string name="nav_rules">规则</string>

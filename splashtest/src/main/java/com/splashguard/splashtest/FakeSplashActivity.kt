@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.widget.FrameLayout
 import android.widget.TextView
 
@@ -19,6 +20,7 @@ import android.widget.TextView
  *   delay     跳过按钮延迟 600ms 才出现   → 应被点击（验证抢跑轮询）
  *   late      跳过按钮延迟 2500ms 才出现  → 应被点击（验证 6 秒窗口）
  *   deep      跳过按钮嵌在 6 层容器里     → 应被点击（验证节点上限/祖先深度）
+ *   nonclick  「跳过」文字不可点、父容器满屏 → **不应点**（宁可不点，不能点广告本体）
  *   shake     「摇一摇跳转详情」+「跳过」 → 只点跳过，不碰摇一摇
  *
  * 点击后写 logcat：tag=FakeSplash, msg=CLICKED:<variant>
@@ -101,6 +103,25 @@ class FakeSplashActivity : Activity() {
                 btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                 placeTopRight(parent, btn, dp(60), dp(28))
             }
+            "nonclick" -> {
+                // 「跳过」文字节点不可点，父容器是满屏可点击广告。
+                // 无障碍应改为在文字中心点一下；点整块广告会记 CLICKED:ad-area（失败）。
+                btn.text = "跳过"
+                btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                btn.isClickable = false
+                placeTopRight(root, btn, dp(60), dp(28))
+                root.isClickable = true
+                root.setOnTouchListener { _, e ->
+                    if (e.action == MotionEvent.ACTION_UP) {
+                        val loc = IntArray(2)
+                        btn.getLocationOnScreen(loc)
+                        val inButton = e.rawX >= loc[0] && e.rawX <= loc[0] + btn.width &&
+                            e.rawY >= loc[1] && e.rawY <= loc[1] + btn.height
+                        Log.i(TAG, if (inButton) "CLICKED:skip" else "CLICKED:ad-area")
+                    }
+                    true
+                }
+            }
             "shake" -> {
                 // 左上角「摇一摇跳转详情」—— 越像广告越好，验证不会被误点
                 val shake = TextView(this).apply {
@@ -123,6 +144,9 @@ class FakeSplashActivity : Activity() {
             Log.i(TAG, "CLICKED:$variant")
             finish()
         }
+        // setOnClickListener 会把 View 自动设为 clickable；nonclick 场景要在最后再关掉，
+        // 才能真正验证「文字节点不可点 → 坐标点击兜底」
+        if (variant == "nonclick") btn.isClickable = false
         setContentView(root)
     }
 

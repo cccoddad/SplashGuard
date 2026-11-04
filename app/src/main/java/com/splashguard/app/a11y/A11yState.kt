@@ -24,6 +24,8 @@ object A11yState {
     @Volatile var lastScanAt: Long = 0L
     @Volatile var lastScanVisited: Int = 0
     @Volatile var lastScanFound: Int = 0
+    @Volatile var lastScanMs: Long = 0L
+    @Volatile var totalScanMs: Long = 0L
     @Volatile var lastClickAt: Long = 0L
     @Volatile var lastClickPkg: String? = null
     @Volatile var eventCount: Long = 0L
@@ -53,6 +55,7 @@ object A11yState {
         eventCount = 0L
         scanCount = 0L
         clickCount = 0L
+        totalScanMs = 0L
         clear()
         log("service connected")
     }
@@ -69,12 +72,16 @@ object A11yState {
         lastEventType = type
     }
 
-    fun onScan(visited: Int, found: Boolean) {
+    fun onScan(visited: Int, found: Boolean, elapsedMs: Long) {
         scanCount++
         lastScanAt = System.currentTimeMillis()
         lastScanVisited = visited
         lastScanFound = if (found) 1 else 0
+        lastScanMs = elapsedMs
+        totalScanMs += elapsedMs
     }
+
+    fun avgScanMs(): Long = if (scanCount == 0L) 0L else totalScanMs / scanCount
 
     fun onClick(pkg: String) {
         clickCount++

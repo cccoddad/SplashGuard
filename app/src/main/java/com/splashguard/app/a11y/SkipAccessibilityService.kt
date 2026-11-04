@@ -31,6 +31,12 @@ import java.util.ArrayDeque
  *
  * 晚于 1.5 秒出现的按钮由 6 秒轮询覆盖；不靠内容变化事件，避免重演旧版耗电问题。
  *
+ * ## v0.1.7 扫描优化
+ *  - 先用 `findAccessibilityNodeInfosByText` 直查，再少量 BFS 兜底，降低冷启动卡顿
+ *  - **不做坐标盲点**：文字节点不可点、祖先又是满屏广告容器时，宁可不点，
+ *    也不能点到广告本体（AGENTS.md 硬约束）
+ *  - 诊断报告记录每次扫描耗时，便于判断卡顿来源
+ *
  * ## 防误点红线（不变）
  *  1. 只在窗口切换后的 6 秒内工作
  *  2. 只匹配「跳过 / 跳过广告 / 关闭广告 / Skip」这类文本（见 [SkipLabelMatcher]）
@@ -54,6 +60,9 @@ class SkipAccessibilityService : AccessibilityService() {
     private var screenHeight = 2400
     private var homePkg: String? = null
     private var lastScanAt = 0L
+    private var lastDeepSearchAt = 0L
+    /** 复用当前窗口的根节点；窗口切换/配置变化时置空 */
+    private var cachedRoot: AccessibilityNodeInfo? = null
 
     /** 抢跑任务：窗口出现后逐次退避地重试，直到点中或超出窗口 */
     private val pollTask = object : Runnable {
@@ -117,6 +126,7 @@ class SkipAccessibilityService : AccessibilityService() {
             // 离开目标 App（回桌面 / 打开本 App）：结束当前窗口，
             // 这样 6 秒内再次打开同一个 App 也能重新开始一轮
             tracker.reset()
+            cachedRoot = null
             return
         }
         if (pkg in IGNORED_PKGS) return
@@ -126,15 +136,25 @@ class SkipAccessibilityService : AccessibilityService() {
         A11yState.log("event ${A11yState.eventTypeName(type)} pkg=$pkg")
 
         when (tracker.onWindowEvent(pkg, now)) {
-            SkipWindowTracker.Action.START_POLL,
+            SkipWindowTracker.Action.START_POLL -> {
+                lastDeepSearchAt = 0L
+                startPoll()
+            }
             SkipWindowTracker.Action.RESTART_POLL -> startPoll()
             else -> Unit
+        }
+
+        // 事件自带的 source 可能在跳过按钮刚渲染时就已包含它：先即时查一次，
+        // 点中就不用等 150ms 的首轮轮询。source 只在本回调内使用。
+        event.source?.let { source ->
+            tryClick(now, rootOverride = source)
         }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         updateScreenSize()
+        cachedRoot = null
         A11yState.log("configuration changed screen=${screenWidth}x$screenHeight")
     }
 
@@ -146,6 +166,7 @@ class SkipAccessibilityService : AccessibilityService() {
         A11yState.onDisconnected("unbind")
         handler.removeCallbacks(pollTask)
         tracker.reset()
+        cachedRoot = null
         return super.onUnbind(intent)
     }
 
@@ -153,12 +174,16 @@ class SkipAccessibilityService : AccessibilityService() {
         A11yState.onDisconnected("destroy")
         handler.removeCallbacks(pollTask)
         tracker.reset()
+        cachedRoot = null
         super.onDestroy()
     }
 
     private fun startPoll() {
         handler.removeCallbacks(pollTask)
-        handler.post(pollTask)
+        // 新的窗口事件：旧根节点可能已失效，下一次重新取
+        cachedRoot = null
+        // 窗口切换的瞬间系统最忙，延后 150ms 再做第一次扫描，避开转场峰值
+        handler.postDelayed(pollTask, INITIAL_POLL_DELAY_MS)
     }
 
     private fun updateScreenSize() {
@@ -170,18 +195,29 @@ class SkipAccessibilityService : AccessibilityService() {
     private fun rootPkg(): String? =
         runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
 
-    private fun tryClick(now: Long) {
+    private fun tryClick(now: Long, rootOverride: AccessibilityNodeInfo? = null) {
         if (!tracker.canClick(now)) return
-        // 内容变化事件可能很密；同一时刻重复扫树没有意义
+        // 同一时刻重复扫树没有意义
         if (now - lastScanAt < SCAN_MIN_INTERVAL_MS) return
         lastScanAt = now
 
-        val root = runCatching { rootInActiveWindow }.getOrNull() ?: return
+        val scanStart = SystemClock.elapsedRealtime()
+        // 复用当前窗口的根节点：refresh() 比每次 rootInActiveWindow() 的 IPC 便宜；
+        // 根节点失效（窗口被销毁）时刷新会返回 false，再重新取。
+        val root = rootOverride
+            ?: cachedRoot?.takeIf { runCatching { it.refresh() }.getOrDefault(false) }
+            ?: runCatching { rootInActiveWindow }.getOrNull()
+            ?: return
+        if (rootOverride == null) cachedRoot = root
         val rootPkg = root.packageName?.toString()
         if (rootPkg == packageName) return
 
-        val result = findSkip(root, MAX_NODES)
-        A11yState.onScan(result.visited, result.target != null)
+        val result = findSkip(root)
+        A11yState.onScan(
+            result.visited,
+            result.target != null,
+            SystemClock.elapsedRealtime() - scanStart,
+        )
         if (result.target == null) {
             if (A11yState.scanCount % 5L == 0L) {
                 A11yState.log("scan pkg=$rootPkg visited=${result.visited} found=0")
@@ -190,8 +226,9 @@ class SkipAccessibilityService : AccessibilityService() {
         }
 
         val targetPkg = result.target.packageName?.toString()
-            ?: root.packageName?.toString()
+            ?: rootPkg
             ?: "unknown"
+
         val clicked = runCatching {
             result.target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         }.getOrDefault(false)
@@ -209,9 +246,38 @@ class SkipAccessibilityService : AccessibilityService() {
         }
     }
 
-    private data class FindResult(val target: AccessibilityNodeInfo?, val visited: Int)
+    private data class FindResult(
+        val target: AccessibilityNodeInfo?,
+        val visited: Int,
+        /** BFS 是否因为达到节点上限而被截断；未截断说明整棵树已经看完 */
+        val truncated: Boolean = false,
+    )
 
-    private fun findSkip(root: AccessibilityNodeInfo, maxNodes: Int): FindResult {
+    /**
+     * 两段式扫描，兼顾覆盖率和冷启动卡顿：
+     *  - 先做 150 节点的快速 BFS，覆盖绝大多数开屏的浅层按钮；
+     *  - 只有 BFS 被截断（树比 150 节点更深）才做全树文本深查，
+     *    且窗口出现 600ms 后、每 1.5 秒最多一次。
+     *    小树/浅层按钮不会触发第二次全树遍历。
+     */
+    private fun findSkip(root: AccessibilityNodeInfo): FindResult {
+        val quick = findSkipBfs(root, QUICK_MAX_NODES)
+        if (quick.target != null || !quick.truncated) return quick
+
+        val now = SystemClock.elapsedRealtime()
+        if (tracker.elapsed(now) < DEEP_SEARCH_START_MS) return quick
+        if (now - lastDeepSearchAt < DEEP_SEARCH_INTERVAL_MS) return quick
+        lastDeepSearchAt = now
+
+        val deep = findSkipByText(root)
+        return if (deep.target != null) {
+            deep
+        } else {
+            FindResult(null, quick.visited + deep.visited)
+        }
+    }
+
+    private fun findSkipBfs(root: AccessibilityNodeInfo, maxNodes: Int): FindResult {
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
         var visited = 0
@@ -225,9 +291,35 @@ class SkipAccessibilityService : AccessibilityService() {
                 isSmall(node)
             ) {
                 clickableTarget(node)?.let { return FindResult(it, visited) }
+                // 没有小尺寸可点击祖先：宁可不点，绝不点广告本体
             }
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { queue.add(it) }
+            }
+        }
+        return FindResult(null, visited, truncated = queue.isNotEmpty())
+    }
+
+    /**
+     * 按文本查（系统 API），只用于快速 BFS 没找到时的深查。
+     * 逐条查、找到即停，避免固定做 4 次全树遍历。
+     */
+    private fun findSkipByText(root: AccessibilityNodeInfo): FindResult {
+        var visited = 0
+        for (query in TEXT_QUERIES) {
+            val found = runCatching {
+                root.findAccessibilityNodeInfosByText(query)
+            }.getOrNull()
+            if (found.isNullOrEmpty()) continue
+
+            for (node in found) {
+                visited++
+                val label = labelOf(node) ?: continue
+                if (!SkipLabelMatcher.isSkipLabel(label)) continue
+                if (!node.isVisibleToUser || !isSmall(node)) continue
+
+                clickableTarget(node)?.let { return FindResult(it, visited) }
+                // 文字节点不可点、祖先又是满屏广告容器：宁可不点
             }
         }
         return FindResult(null, visited)
@@ -275,23 +367,31 @@ class SkipAccessibilityService : AccessibilityService() {
 
         /** 抢跑总时长：与 PRD/旧版一致，覆盖 2~3 秒才出现的跳过按钮 */
         const val POLL_WINDOW_MS = 6000L
+        /** 窗口切换后延后多久做第一次扫描，避开转场峰值 */
+        private const val INITIAL_POLL_DELAY_MS = 150L
         /** 前段密集：跳过按钮刚渲染的高峰期 */
         private const val DENSE_PHASE_MS = 600L
-        private const val DENSE_INTERVAL_MS = 100L
+        private const val DENSE_INTERVAL_MS = 250L
         /** 中段：异步填充较慢的广告 SDK */
-        private const val MID_PHASE_MS = 2000L
-        private const val MID_INTERVAL_MS = 250L
+        private const val MID_PHASE_MS = 3000L
+        private const val MID_INTERVAL_MS = 700L
         /** 后段：只做低频兜底，避免 6 秒内反复扫树 */
-        private const val SPARSE_INTERVAL_MS = 800L
+        private const val SPARSE_INTERVAL_MS = 1500L
         /** 两次点击的最小间隔 */
         private const val COOLDOWN_MS = 2000L
         /** 同包名的窗口事件间隔超过这个值，才当作「又一次启动」 */
         private const val SAME_PKG_RESTART_MS = 1500L
-        /** 单次扫描的节点上限。跳过按钮通常在浅层，但 WebView/复杂布局会更深 */
-        private const val MAX_NODES = 400
+        /** 每次扫描先做的快速 BFS 节点上限 */
+        private const val QUICK_MAX_NODES = 150
+        /** 窗口出现多久后才允许全树文本深查（避开冷启动最忙的阶段） */
+        private const val DEEP_SEARCH_START_MS = 600L
+        /** 全树文本深查的最小间隔 */
+        private const val DEEP_SEARCH_INTERVAL_MS = 1500L
+        /** 用系统文本查找接口预筛；逐条查、找到即停 */
+        private val TEXT_QUERIES = arrayOf("跳过", "skip", "Skip", "关闭广告")
         /** 向上找可点击祖先的最大层数 */
         private const val MAX_ANCESTOR_DEPTH = 8
-        /** 两次扫描的最小间隔，避免内容变化与轮询在同一时刻重复扫树 */
+        /** 两次扫描的最小间隔，避免轮询重复扫树 */
         private const val SCAN_MIN_INTERVAL_MS = 80L
 
         /** 这些窗口不是目标 App：桌面、系统 UI、权限弹窗、输入法 */

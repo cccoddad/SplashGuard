@@ -221,12 +221,18 @@ class SplashGuardVpnService : VpnService() {
                 break
             }
             if (n == 0) {
-                // 关键：tun 上没有报文时若 read 返回 0，绝不能 continue —— 那会变成 100% 空转，
-                // 表现为「什么都没干却让手机发烫」。这里让出 CPU 并设一个上限，连续空读就退出。
+                // 0 只表示「当前没有报文」，不等于 fd 失效。v0.1.5 曾在这里连续 200 次
+                // （约 2 秒）就 break，某些机型空闲时 read 返回 0，结果隧道自己关掉。
+                // 现在只在连续空读后检查 fd 是否仍有效；有效就继续等，绝不因空闲拆隧道。
                 zeroStreak++
-                if (zeroStreak > MAX_ZERO_READS) {
-                    Log.w(TAG, "reader gen=$gen zero-read x$MAX_ZERO_READS, exit")
-                    break
+                if (zeroStreak >= ZERO_READS_BEFORE_FD_CHECK) {
+                    zeroStreak = 0
+                    val valid = runCatching { tun?.fileDescriptor?.valid() == true }.getOrDefault(false)
+                    if (!valid) {
+                        Log.w(TAG, "reader gen=$gen fd invalid after idle, exit")
+                        break
+                    }
+                    Log.i(TAG, "reader gen=$gen idle zero-reads, fd still valid")
                 }
                 runCatching { Thread.sleep(ZERO_READ_BACKOFF_MS) }
                 continue
@@ -261,8 +267,17 @@ class SplashGuardVpnService : VpnService() {
         val rule = RuleStore.match(question.name)
 
         if (rule != null) {
+            val blockKey = "B|" + question.name + "|" + question.qType
+            cacheGet(blockKey, DnsPacket.queryId(payload))?.let { cached ->
+                DnsStats.onBlock(cacheHit = true)
+                reply(packet, cached)
+                return
+            }
+
             val resp = DnsPacket.buildBlockResponse(payload, payload.size, prefs.blockMode)
             if (resp.isNotEmpty()) {
+                blockCachePut(blockKey, resp)
+                DnsStats.onBlock(cacheHit = false)
                 BlockLog.record(pkgFor(info), question.name, rule)
                 prefs.bumpBlockCount()
             }
@@ -315,22 +330,38 @@ class SplashGuardVpnService : VpnService() {
         synchronized(cacheLock) { dnsCache[key] = entry }
     }
 
+    /**
+     * 拦截应答缓存：0.0.0.0 / NXDOMAIN 不满足 [cachePut] 的「NOERROR + 有答案」条件，
+     * 单独缓存 60 秒。广告 SDK 重试同一域名时直接回包，不再重复记日志/写计数。
+     */
+    private fun blockCachePut(key: String, response: ByteArray) {
+        if (response.size < 12) return
+        val entry = CacheEntry(response, SystemClock.elapsedRealtime() + BLOCK_CACHE_TTL_MS)
+        synchronized(cacheLock) { dnsCache[key] = entry }
+    }
+
     /** 转发到上游。socket 必须 protect()，否则会再次进入自己的 tun 形成死循环。 */
     private fun forward(payload: ByteArray, upstream: String): ByteArray? {
+        val start = SystemClock.elapsedRealtime()
+        var ok = false
         return try {
             DatagramSocket().use { socket ->
                 if (!protect(socket)) return null
                 socket.soTimeout = Const.UPSTREAM_TIMEOUT_MS
                 val addr = upstreamAddress(upstream) ?: return null
                 socket.send(DatagramPacket(payload, payload.size, addr, Const.DNS_PORT))
-                val buf = ByteArray(4096)
+                val buf = ByteArray(65535)
                 val resp = DatagramPacket(buf, buf.size)
                 socket.receive(resp)
-                buf.copyOf(resp.length)
+                val out = buf.copyOf(resp.length)
+                ok = true
+                out
             }
         } catch (e: Exception) {
             Log.w(TAG, "forward to $upstream failed: ${e.message}")
             null
+        } finally {
+            DnsStats.onForward(SystemClock.elapsedRealtime() - start, ok)
         }
     }
 
@@ -476,13 +507,23 @@ class SplashGuardVpnService : VpnService() {
         private const val MAX_CACHE_ENTRIES = 256
         /** 缓存存活时间。刻意保守：太长会让 CDN 调度变钝，太短则起不到省电作用 */
         private const val CACHE_TTL_MS = 45_000L
+        /** 拦截应答缓存时间，与 DnsPacket 里拦截应答的 TTL 保持一致 */
+        private const val BLOCK_CACHE_TTL_MS = 60_000L
         /** 超过这个大小的应答不缓存（多为超长 TXT，命中率低） */
         private const val MAX_CACHE_PACKET = 1024
 
-        /** tun read 返回 0 时连续空读的上限：超过就认为 fd 已失效，退出读循环 */
-        private const val MAX_ZERO_READS = 200
-        /** 每次空读让出 CPU 的时间 */
-        private const val ZERO_READ_BACKOFF_MS = 10L
+        /**
+         * 连续空读达到这个次数（约 50 秒）才检查一次 fd 是否还有效。
+         * 0 只代表「暂时没有报文」，不能作为拆隧道的依据。
+         */
+        private const val ZERO_READS_BEFORE_FD_CHECK = 1000
+        /**
+         * 每次空读让出 CPU 的时间。
+         * 某些机型空闲时 read 会持续返回 0；10ms 退避等于每秒 100 次唤醒，
+         * 实测空闲仍有约 3% 一个核。50ms 把空闲唤醒降到 20 次/秒，
+         * DNS 最坏只多等 50ms，远小于一次上游往返。
+         */
+        private const val ZERO_READ_BACKOFF_MS = 50L
 
         @Volatile
         var isRunning: Boolean = false
