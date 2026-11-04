@@ -99,8 +99,7 @@ adb shell dumpsys activity activities | grep topResumedActivity
 adb logcat -d | grep -E "FATAL EXCEPTION|ANR in com.splashguard"   # 0 条
 ```
 
-- 首屏渲染正常，中文无乱码，无错位：`docs/evidence/A1-first-launch.png`
-- **首次开启引导**：先弹系统 VPN 授权 `Connection request`（`B1-vpn-consent.png`），
+- 首屏渲染正常，中文无乱码，无错位：`docs/evidence/A1-first-launch.png`- **首次开启引导**：先弹系统 VPN 授权 `Connection request`（`B1-vpn-consent.png`），
   API 33+ 再弹 `POST_NOTIFICATIONS` 权限（`A2-notif-permission.png`）。两个弹窗都能正常走完。
 - 判定：**通过**
 
@@ -213,10 +212,27 @@ FATAL EXCEPTION / ANR = 0
 reader "died unexpectedly" / "after retries" = 0
 ```
 
+**后台驻留 10 分钟**（关屏，不交互）：
+
+```
+起点 15:11:54  TOTAL PSS 41325   RSS 163660
+终点 15:21:13  TOTAL PSS 40590   RSS 163148     ← 无增长（略降）
+崩溃/ANR 0 条 | tun0 存活 | 被拦域名仍 → 127.0.0.1 | 普通域名正常解析
+Activities: 1（MainActivity 保留），AppContexts: 7（无泄漏迹象）
+```
+
+**网络切换**（飞行模式开 → 关）：
+
+```
+开飞行模式后: tun0 仍在；日志 1 条 forward ENETUNREACH（无网络，属预期）
+关飞行模式后 25s: tun0 正常；gdt.qq.com → 127.0.0.1；www.163.com → 真实 IP
+全程 0 崩溃，无需手动重启拦截
+```
+
 > 说明：脚本在第二次点击后 1.2s 抓界面时偶尔拍到「运行中」，是因为状态文本刷新有延迟，
 > 日志里 START/STOP 各 20 条已经证明每次开关都真实生效。
 
-**后台驻留**：见 §4 的回归数据（结束时间与内存见附录）。
+**钥匙图标**：状态栏出现系统 VPN 钥匙图标（`B2-vpn-key-icon.png`），`VpnTransportInfo{sessionId=SplashGuard}`。
 
 ### H. 兼容性
 
