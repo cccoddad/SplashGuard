@@ -28,3 +28,6 @@ Architecture red lines:
 Before coding: state what you will change, why, and the expected result.
 Before finishing: run `./gradlew test`, the 7 accessibility scenarios, and one real cold start
 for behavior changes. Never claim "fixed" without verification.
+
+After each major optimization or fix, commit only the related files and run
+`git push origin main`. Do not leave large changes only in the local workspace.

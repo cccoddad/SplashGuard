@@ -83,6 +83,9 @@ DNS 层：VpnService 只接管 DNS（虚拟 DNS + 常见公共 DNS 的 /32）
 5. **没验证不能说“已修复”**。可以说“改好了，但还没在真机验证”。
 6. **改版本号时**同步 `CHANGELOG.md`、`docs/real-device-guide.md`、README。
 7. 需求与硬约束冲突时，**停下来解释冲突**，不要自行放宽约束。
+8. **每完成一次较大的优化/修复**（功能、性能、规则库、架构调整等），必须通过 Git 保存并推送：
+   先跑回归测试，再 `git add` 本次相关文件，`git commit`，`git push origin main`。
+   不要积累多个大改动只留在本地；提交前确认没有 `keystore/`、`local.properties`、`dist/`、日志或诊断报告。
 
 ## 6. 代码约定
 
@@ -129,6 +132,14 @@ DNS 层：VpnService 只接管 DNS（虚拟 DNS + 常见公共 DNS 的 /32）
 ```bash
 git status
 git ls-files | findstr /i "keystore local.properties dist"
+```
+
+每次较大的优化/修复完成后：
+
+```bash
+git add <本次相关文件>
+git commit -m "feat/fix/docs: ..."
+git push origin main
 ```
 
 ## 9. 沟通偏好
