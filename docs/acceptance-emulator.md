@@ -358,3 +358,47 @@ adb shell cat /sys/class/net/eth0/statistics/rx_bytes
 ```
 
 **证据索引**：`docs/evidence/` —— 首页/授权弹窗/深色模式截图、各页面 UI 树、后台内存快照。
+
+---
+
+## 8. v0.1.6 无障碍回归（2026-11-04，API 34 模拟器）
+
+**背景**：真机反馈 0.1.5 更新后所有 App 都不跳过。定位到两条根因：
+① 只监听 `TYPE_WINDOW_STATE_CHANGED` + 1.5 秒窗口，Android 16 / HyperOS 上经常触发不到；
+② 覆盖安装后 `enabled_accessibility_services` 仍有值，但系统已解绑服务，界面显示「已授权」实际不运行。
+
+**结果：9/9 通过。**
+
+| 场景 | 期望 | 实测 |
+|---|---|---|
+| `skip` | 点中 | `CLICKED:skip`（约 0.5s） |
+| `skipcount`（「跳过 3」） | 点中 | `CLICKED:skipcount` |
+| `delay`（按钮 600ms 后出现） | 点中 | `CLICKED:delay` |
+| `late`（按钮 2500ms 后出现） | 点中 | `CLICKED:late`（出现后约 180ms） |
+| `deep`（按钮在 6 层容器里） | 点中 | `CLICKED:deep` |
+| `shake`（「摇一摇」+「跳过」） | 只点跳过 | `CLICKED:shake`，未点摇一摇 |
+| `huge`（全宽按钮） | 不点 | 无 `CLICKED` |
+| `other`（「关闭」文案） | 不点 | 无 `CLICKED` |
+| `ad`（整块广告） | 不点 | 无 `CLICKED` |
+
+**命令**（同一测试包连续启动必须间隔 >6 秒，否则会被窗口状态机判为同一窗口）：
+
+```bash
+for v in skip skipcount delay late deep shake huge other ad; do
+  adb logcat -c
+  adb shell am force-stop com.splashguard.splashtest
+  adb shell am start -n com.splashguard.splashtest/.FakeSplashActivity --es variant $v
+  sleep 7.5
+  adb logcat -d -s FakeSplash:V | grep "CLICKED:$v"
+  adb shell am force-stop com.splashguard.splashtest
+done
+```
+
+**其他验证**
+
+- 覆盖安装 APK 后服务恢复绑定，首页显示「自动跳过 · 开」，`skip` 恢复点击。
+- 一键隐藏：`accessibility_shortcut_enabled=0`、`accessibility_button_targets=null`，
+  `enabled_accessibility_services` 仍包含本服务，`skip` 仍点中。
+- 空闲 10 秒：App 进程 utime+stime 增量 = 0 ticks。
+- 单元测试 40 项全绿（新增文案匹配 6 项、窗口状态机 7 项）。
+- **真机（小米 13 Pro / Android 16）仍待安装 v0.1.6 后确认。**

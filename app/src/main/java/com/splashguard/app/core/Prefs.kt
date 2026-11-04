@@ -75,7 +75,7 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_BOOT_GUIDED, false)
         set(v) = sp.edit().putBoolean(KEY_BOOT_GUIDED, v).apply()
 
-    // ---- 今日拦截计数（跨天自动归零） ----
+    // ---- 今日拦截 / 自动跳过计数（跨天自动归零） ----
 
     fun bumpBlockCount() {
         rollDateIfNeeded()
@@ -87,14 +87,43 @@ class Prefs(context: Context) {
         return sp.getInt(KEY_COUNT, 0)
     }
 
+    /** 无障碍成功点掉一次「跳过」时调用 */
+    fun bumpSkipCount(pkg: String?) {
+        rollDateIfNeeded()
+        sp.edit()
+            .putInt(KEY_SKIP_COUNT, sp.getInt(KEY_SKIP_COUNT, 0) + 1)
+            .putLong(KEY_LAST_SKIP_AT, System.currentTimeMillis())
+            .putString(KEY_LAST_SKIP_PKG, pkg)
+            .apply()
+    }
+
+    fun todaySkipCount(): Int {
+        rollDateIfNeeded()
+        return sp.getInt(KEY_SKIP_COUNT, 0)
+    }
+
+    fun lastSkipAt(): Long = sp.getLong(KEY_LAST_SKIP_AT, 0L)
+
+    fun lastSkipPkg(): String? = sp.getString(KEY_LAST_SKIP_PKG, null)
+
     fun resetTodayCount() {
-        sp.edit().putInt(KEY_COUNT, 0).putString(KEY_DATE, today()).apply()
+        sp.edit()
+            .putInt(KEY_COUNT, 0)
+            .putInt(KEY_SKIP_COUNT, 0)
+            .putString(KEY_DATE, today())
+            .remove(KEY_LAST_SKIP_AT)
+            .remove(KEY_LAST_SKIP_PKG)
+            .apply()
     }
 
     private fun rollDateIfNeeded() {
         val t = today()
         if (sp.getString(KEY_DATE, null) != t) {
-            sp.edit().putString(KEY_DATE, t).putInt(KEY_COUNT, 0).apply()
+            sp.edit()
+                .putString(KEY_DATE, t)
+                .putInt(KEY_COUNT, 0)
+                .putInt(KEY_SKIP_COUNT, 0)
+                .apply()
         }
     }
 
@@ -113,6 +142,9 @@ class Prefs(context: Context) {
         private const val KEY_A11Y = "a11y_enabled"
         private const val KEY_BOOT_GUIDED = "boot_guided"
         private const val KEY_COUNT = "block_count"
+        private const val KEY_SKIP_COUNT = "skip_count"
+        private const val KEY_LAST_SKIP_AT = "last_skip_at"
+        private const val KEY_LAST_SKIP_PKG = "last_skip_pkg"
         private const val KEY_DATE = "block_date"
     }
 }

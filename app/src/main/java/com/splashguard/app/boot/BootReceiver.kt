@@ -11,6 +11,7 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.splashguard.app.R
+import com.splashguard.app.a11y.A11yController
 import com.splashguard.app.core.Const
 import com.splashguard.app.core.Prefs
 import com.splashguard.app.net.SplashGuardVpnService
@@ -28,6 +29,12 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action ?: return
         if (action != Intent.ACTION_BOOT_COMPLETED && action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+
+        // 更新 App 后，系统经常把无障碍服务解绑：列表里还有、但服务没运行。
+        // 只在「原本就启用」时自动重新绑定，避免把用户主动关掉的服务又打开。
+        if (action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            runCatching { A11yController.repairBinding(context, onlyIfListed = true) }
+        }
 
         val prefs = Prefs(context)
         if (!prefs.bootStart) return

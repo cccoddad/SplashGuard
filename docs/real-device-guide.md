@@ -1,6 +1,6 @@
 # 真机验收操作手册
 
-> 目标：把 `dist/SplashGuard-0.1.5.apk` 装到你的安卓手机上，跑完 5 步冒烟验证，  
+> 目标：把 `dist/SplashGuard-0.1.6.apk` 装到你的安卓手机上，跑完 5 步冒烟验证，  
 > 把「诊断报告」发回来。全程约 10 分钟，不需要电脑（有电脑更快）。
 >
 > 适用：Android 8.0（API 26）及以上。华为鸿蒙、小米、OPPO、vivo、三星、原生均可。
@@ -11,9 +11,9 @@
 
 | 项    | 值                                                                       |
 | ---- | ----------------------------------------------------------------------- |
-| 文件   | 桌面 `SplashGuard-0.1.5.apk`（推荐）；或 `dist/SplashGuard-0.1.5.apk`（约 4.6 MB） |
+| 文件   | 桌面 `SplashGuard-0.1.6.apk`（推荐）；或 `dist/SplashGuard-0.1.6.apk`（约 4.8 MB） |
 | 包名   | `com.splashguard.app`                                                   |
-| 版本   | 0.1.5 (versionCode 3)                                                   |
+| 版本   | 0.1.6 (versionCode 6)                                                   |
 | 签名   | 自签名（非商店分发）                                                              |
 | 最低系统 | Android 8.0                                                             |
 | 联网行为 | 只有 DNS 转发，无其他出站请求                                                       |
@@ -33,7 +33,7 @@ adb devices
 # 应看到一行 xxxxx  device
 
 # 2. 安装
-adb install -r dist/SplashGuard-0.1.5.apk
+adb install -r dist/SplashGuard-0.1.6.apk
 # 输出 Success 即成功
 ```
 
@@ -41,21 +41,21 @@ adb install -r dist/SplashGuard-0.1.5.apk
 
 **先找到文件** —— 下面三处内容完全相同，任选一处：
 
-- 电脑桌面：`SplashGuard-0.1.5.apk`
-- 电脑桌面：`SplashGuard-0.1.5.zip`（微信专用，推荐，原因见下）
-- 项目目录：`D:\vs-document\SplashGuard\dist\SplashGuard-0.1.5.apk`
+- 电脑桌面：`SplashGuard-0.1.6.apk`
+- 电脑桌面：`SplashGuard-0.1.6.zip`（微信专用，推荐，原因见下）
+- 项目目录：`D:\vs-document\SplashGuard\dist\SplashGuard-0.1.6.apk`
 
 **微信的坑：微信会把 `.apk` 自动改名成 `.apk.1`**（防止自动安装），所以很多人发过去之后  
 在手机端「找不到文件」或点开提示「无法打开」。zip 压缩包不会被改名。
 
 推荐走 zip：
 
-1. 电脑微信 →「文件传输助手」→ 发送 `SplashGuard-0.1.5.zip`
+1. 电脑微信 →「文件传输助手」→ 发送 `SplashGuard-0.1.6.zip`
 2. 手机微信里点开该 zip →「用其他应用打开」→ 选系统的「文件管理」
-3. 解压出 `SplashGuard-0.1.5.apk` → 点击安装
+3. 解压出 `SplashGuard-0.1.6.apk` → 点击安装
 4. 若提示「禁止安装未知应用」，点提示去开启本来源的安装权限，回来重试
 
-如果坚持直接传 apk：手机文件管理进 `Download/WeiXin/` 找到 `SplashGuard-0.1.5.apk.1`，  
+如果坚持直接传 apk：手机文件管理进 `Download/WeiXin/` 找到 `SplashGuard-0.1.6.apk.1`，  
 **重命名把结尾的 `.1` 删掉**，再点开就能装。
 
 > QQ 传文件通常不加后缀，比微信省事。也可以用手机 QQ / 钉钉的「传文件到手机」。
@@ -100,16 +100,40 @@ adb install -r dist/SplashGuard-0.1.5.apk
    这正是「列表里没有 SplashGuard」的最常见原因
 4. 确认 App 真的装上了：设置 → 应用设置 → 应用管理 → 搜 `SplashGuard`。没装上的话列表里当然没有
 
-#### 实在找不到：用电脑一条命令开启
+#### 实在找不到：用电脑一条命令开启 / 修复
 
-手机开 USB 调试并连电脑，在电脑上执行（App 里点「自动跳过」→「复制 ADB 命令」会自动复制这两行）：
+手机开 USB 调试并连电脑，在电脑上执行（App 里点「自动跳过」→「复制 ADB 命令」会自动复制这一条）：
 
 ```bash
-adb shell settings put secure enabled_accessibility_services com.splashguard.app/com.splashguard.app.a11y.SkipAccessibilityService
-adb shell settings put secure accessibility_enabled 1
+adb shell 'comp=com.splashguard.app/com.splashguard.app.a11y.SkipAccessibilityService; cur=$(settings get secure enabled_accessibility_services); [ "$cur" = "null" ] && cur=""; without=$(echo "$cur" | sed "s#$comp:##g; s#:$comp##g; s#$comp##g; s/^://; s/:$//"); settings put secure enabled_accessibility_services "$without"; sleep 1; settings put secure enabled_accessibility_services "${without:+$without:}$comp"; settings put secure accessibility_enabled 1'
 ```
 
+这条命令会先移除本服务、再重新加入，**保留 TalkBack 等其他无障碍服务**；既能首次开启，也能修复「显示已授权、实际没运行」的状态。
+
 执行完回到 App 看按钮是否变成「自动跳过 · 开」。
+
+#### 更新 App 后「一个都不跳过」怎么办
+
+v0.1.6 会自己处理大部分情况：
+
+- 打开 SplashGuard，如果按钮显示「**自动跳过 · 未连接**」，点它 →「一键修复」（需要下面的一次性授权）。
+- 没给权限时，点「复制 ADB 命令」，在电脑上执行上面的命令即可。
+- App 更新后，如果服务原本就在系统列表里，`MY_PACKAGE_REPLACED` 也会自动重新绑定。
+
+一次性授权（可选，用来「一键修复」和「一键隐藏无障碍按钮」）：
+
+```bash
+adb shell pm grant com.splashguard.app android.permission.WRITE_SECURE_SETTINGS
+```
+
+这只是允许 App 读写**系统无障碍开关**，不读账号/密码，也不联网。
+
+#### 屏幕上的「无障碍」悬浮按钮
+
+那个按钮是 Android 系统的「无障碍快捷方式」，不是 SplashGuard 画的悬浮窗；关掉它不会关掉自动跳过。
+
+- 手动关：设置 → 无障碍 → 无障碍快捷方式 → 关闭
+- 或：打开 SplashGuard → 点「自动跳过」→「一键隐藏」（需要上面的一次性授权）
 
 > **小米特别注意**：部分 HyperOS 版本会拦截 adb 修改 `secure` 设置，需要在  
 > 开发者选项里额外打开「**USB 调试（安全设置）**」才生效（该开关要求登录小米账号）。  
@@ -282,7 +306,9 @@ VPN 没建立。依次检查：
 ### 无障碍开了但从不点击
 
 1. 系统设置 → 无障碍 → 确认 SplashGuard 自动跳过是「已开启」状态（不是只是装了）
-2. 部分 ROM 会在 App 更新后自动关闭无障碍，需要重新开
+2. **看 App 首页按钮是「自动跳过 · 开」还是「自动跳过 · 未连接」**：
+   - 未连接 = 系统列表里有、但服务没运行。点按钮 →「一键修复」，或复制 ADB 命令执行
+   - 更新 App 后最常见的就是这个状态；v0.1.6 会在打开 App 时自动尝试修复一次
 3. 目标 App 的开屏是自绘的 → 无障碍树里没有「跳过」文字节点，读不到就是点不到
 
 ### 后台一段时间后失效

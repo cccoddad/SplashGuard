@@ -1,5 +1,6 @@
 package com.splashguard.app.ui
 
+import android.Manifest
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -9,6 +10,7 @@ import android.graphics.Typeface
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.View
 import android.view.View.MeasureSpec
@@ -22,6 +24,8 @@ import androidx.core.content.FileProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.splashguard.app.R
+import com.splashguard.app.a11y.A11yController
+import com.splashguard.app.a11y.A11yState
 import com.splashguard.app.core.Prefs
 import com.splashguard.app.databinding.ActivityMainBinding
 import com.splashguard.app.diag.DiagnosticReport
@@ -37,6 +41,9 @@ class MainActivity : AppCompatActivity() {
 
     private var suppressSwitch = false
     private var pendingEnable = false
+    private var repairingA11y = false
+    private var lastRepairAt = 0L
+    private var promptedA11yNotConnected = false
     private val labelCache = HashMap<String, String>()
 
     private val vpnPermission =
@@ -99,6 +106,8 @@ class MainActivity : AppCompatActivity() {
         SplashGuardVpnService.setStateListener(stateListener)
         BlockLog.addListener(logListener)
         refresh()
+        // 稍等一会儿再判断：系统可能在 Activity 启动后才把服务绑上
+        b.root.postDelayed({ maybeRepairA11y() }, 900)
     }
 
     override fun onPause() {
@@ -150,12 +159,13 @@ class MainActivity : AppCompatActivity() {
         b.tvStatus.text = getString(if (running) R.string.status_on else R.string.status_off)
         b.tvStatusSub.text = getString(if (running) R.string.status_hint_on else R.string.status_hint_off)
         b.tvToday.text = prefs.todayCount().toString()
+        b.tvTodaySkip.text = prefs.todaySkipCount().toString()
         b.tvRules.text = RuleStore.ruleCount.toString()
 
-        b.btnA11y.text = if (isA11yEnabled) {
-            getString(R.string.nav_a11y) + " · 开"
-        } else {
-            getString(R.string.nav_a11y)
+        b.btnA11y.text = when {
+            isA11yEnabled && A11yState.connected -> getString(R.string.nav_a11y) + " · 开"
+            isA11yEnabled -> getString(R.string.nav_a11y) + " · 未连接"
+            else -> getString(R.string.nav_a11y)
         }
 
         refreshLog()
@@ -190,25 +200,139 @@ class MainActivity : AppCompatActivity() {
         }
 
     private fun openAccessibilitySettings() {
-        if (isA11yEnabled) {
-            toast(getString(R.string.a11y_on))
-            runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        if (!isA11yEnabled) {
+            showA11yGuide()
             return
         }
+        if (!A11yState.connected) {
+            showA11yNotConnectedDialog()
+            return
+        }
+        if (A11yController.isShortcutEnabled(this)) {
+            showHideButtonDialog()
+        } else {
+            toast(getString(R.string.a11y_on))
+            openA11ySettingsPage()
+        }
+    }
+
+    private fun showA11yGuide() {
         // 各厂商把入口藏得深浅不一（小米尤其），先给一份带机型提示的引导
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.a11y_guide_title)
             .setMessage(R.string.a11y_guide_body)
-            .setPositiveButton(R.string.a11y_go_settings) { _, _ ->
-                runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                    .onFailure { toast(getString(R.string.toast_open_settings_failed)) }
-            }
+            .setPositiveButton(R.string.a11y_go_settings) { _, _ -> openA11ySettingsPage() }
             .setNeutralButton(R.string.a11y_copy_adb) { _, _ ->
                 copyToClipboard(ADB_A11Y_COMMAND, getString(R.string.toast_adb_copied))
             }
             .setNegativeButton(R.string.action_close, null)
             .show()
     }
+
+    /**
+     * 系统显示已授权、但服务没有真正连上。更新 App 后 HyperOS 重置无障碍服务是最常见的原因。
+     */
+    private fun showA11yNotConnectedDialog() {
+        val canWrite = A11yController.canWriteSecureSettings(this)
+        val builder = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.a11y_not_connected_title)
+            .setMessage(R.string.a11y_not_connected_body)
+            .setNegativeButton(R.string.action_close, null)
+
+        if (canWrite) {
+            builder.setPositiveButton(R.string.a11y_repair) { _, _ -> startA11yRepair() }
+            builder.setNeutralButton(R.string.a11y_go_settings) { _, _ -> openA11ySettingsPage() }
+        } else {
+            builder.setPositiveButton(R.string.a11y_go_settings) { _, _ -> openA11ySettingsPage() }
+            builder.setNeutralButton(R.string.a11y_copy_adb) { _, _ ->
+                copyToClipboard(ADB_A11Y_COMMAND, getString(R.string.toast_adb_copied))
+            }
+        }
+        builder.show()
+    }
+
+    private fun startA11yRepair() {
+        if (!A11yController.repairBinding(this)) {
+            toast(getString(R.string.toast_a11y_repair_failed))
+            return
+        }
+        toast(getString(R.string.toast_a11y_repairing))
+        b.root.postDelayed({ refresh() }, 1500)
+    }
+
+    /**
+     * 打开 App 时如果「系统已授权但服务未连接」，自动做一次移除/重新加入，
+     * 修复更新 App 后被系统解绑的状态。15 秒冷却，避免反复写设置。
+     */
+    private fun maybeRepairA11y() {
+        if (!isA11yEnabled || A11yState.connected) return
+
+        if (!A11yController.canWriteSecureSettings(this)) {
+            // 没权限时至少把「服务没连上」明确告诉用户，而不是显示一个假的「已开启」
+            if (!promptedA11yNotConnected && !isFinishing) {
+                promptedA11yNotConnected = true
+                showA11yNotConnectedDialog()
+            }
+            return
+        }
+
+        val now = SystemClock.elapsedRealtime()
+        if (repairingA11y || now - lastRepairAt < REPAIR_COOLDOWN_MS) return
+
+        repairingA11y = true
+        lastRepairAt = now
+        val started = A11yController.repairBinding(this) {
+            b.root.postDelayed({
+                repairingA11y = false
+                refresh()
+            }, 1200)
+        }
+        if (!started) {
+            repairingA11y = false
+            return
+        }
+        b.root.postDelayed({ repairingA11y = false }, 2500)
+    }
+
+    /**
+     * 屏幕上的无障碍悬浮按钮是系统的「无障碍快捷方式」，不是本 App 画的。
+     * 关掉快捷方式不会关掉已开启的无障碍服务。
+     */
+    private fun showHideButtonDialog() {
+        val canWrite = A11yController.canWriteSecureSettings(this)
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.a11y_button_title)
+            .setMessage(getString(R.string.a11y_button_body))
+            .setPositiveButton(
+                if (canWrite) R.string.a11y_button_hide else R.string.a11y_button_copy_grant
+            ) { _, _ ->
+                if (canWrite) {
+                    hideAccessibilityButton()
+                } else {
+                    copyToClipboard(grantSecureSettingsCommand(), getString(R.string.toast_adb_copied))
+                }
+            }
+            .setNeutralButton(R.string.a11y_go_settings) { _, _ -> openA11ySettingsPage() }
+            .setNegativeButton(R.string.action_close, null)
+            .show()
+    }
+
+    private fun openA11ySettingsPage() {
+        runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+            .onFailure { toast(getString(R.string.toast_open_settings_failed)) }
+    }
+
+    private fun hideAccessibilityButton() {
+        if (A11yController.hideShortcutButton(this)) {
+            toast(getString(R.string.toast_a11y_button_hidden))
+            refresh()
+        } else {
+            toast(getString(R.string.toast_a11y_button_hide_failed))
+        }
+    }
+
+    private fun grantSecureSettingsCommand(): String =
+        "adb shell pm grant $packageName ${Manifest.permission.WRITE_SECURE_SETTINGS}"
 
     // ---------------- 诊断报告（真机验收用） ----------------
 
@@ -280,10 +404,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private companion object {
-        /** 系统设置里实在找不到入口时，让用户复制去电脑上用 adb 授权 */
+        /** 自动修复的最小间隔，避免反复写系统设置 */
+        const val REPAIR_COOLDOWN_MS = 15_000L
+
+        /**
+         * 系统设置里找不到入口时的 ADB 兜底。
+         * 先把本服务从列表里移除、再重新加入，强制系统重新绑定；
+         * 同时保留 TalkBack 等其他无障碍服务。
+         */
         const val ADB_A11Y_COMMAND =
-            "adb shell settings put secure enabled_accessibility_services " +
-                "com.splashguard.app/com.splashguard.app.a11y.SkipAccessibilityService\n" +
-                "adb shell settings put secure accessibility_enabled 1"
+            "adb shell 'comp=com.splashguard.app/com.splashguard.app.a11y.SkipAccessibilityService; " +
+                "cur=\$(settings get secure enabled_accessibility_services); " +
+                "[ \"\$cur\" = \"null\" ] && cur=\"\"; " +
+                "without=\$(echo \"\$cur\" | sed \"s#\$comp:##g; s#:\$comp##g; s#\$comp##g; s/^://; s/:\$//\"); " +
+                "settings put secure enabled_accessibility_services \"\$without\"; " +
+                "sleep 1; " +
+                "settings put secure enabled_accessibility_services \"\${without:+\$without:}\$comp\"; " +
+                "settings put secure accessibility_enabled 1'"
     }
 }

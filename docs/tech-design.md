@@ -113,17 +113,27 @@ MVP **不做远程订阅**：一来隐私原则要求全本地，二来没有维
 ## 6. 无障碍自动跳过
 
 ```kotlin
-// 伪代码：严格限制动作条件
+// 伪代码：严格限制动作条件（v0.1.6）
 if (now - lastClick < 2000) return
-if (now - lastWindowChange > 6000) return
-val node = bfs(rootInActiveWindow) { n ->
+if (now - windowStart > 6000) return
+val node = bfs(rootInActiveWindow, maxNodes = 400) { n ->
     val t = (n.text ?: n.contentDescription)?.toString()?.trim()
-    t in SKIP_TEXTS && n.isClickable && widthRatio(n) < 0.6
+    SkipLabelMatcher.isSkipLabel(t) &&
+        isVisible(n) &&
+        widthRatio(n) <= 0.6 && heightRatio(n) <= 0.2
 }
-node?.performAction(ACTION_CLICK)
+clickableAncestor(node, maxDepth = 8)?.performAction(ACTION_CLICK)
 ```
 
-`SKIP_TEXTS = ["跳过", "跳过广告", "关闭广告", "Skip", "Skip Ad"]`
+- **触发**：只监听 `TYPE_WINDOW_STATE_CHANGED` 和 `TYPE_WINDOWS_CHANGED`；
+  **不监听** `TYPE_WINDOW_CONTENT_CHANGED`（旧版全树遍历导致发烫，AGENTS.md 红线）。
+- **轮询**：窗口出现后 6 秒内，0–600ms 每 100ms、600–2000ms 每 250ms、之后每 800ms；
+  点到即停。晚于 1.5 秒出现的按钮由这段轮询覆盖。
+- **同包名**：1.5 秒内的窗口事件会**重启轮询**（v0.1.5 只刷新时间，是漏点根因之一）。
+- **更新后修复**：覆盖安装后服务可能「已授权但未绑定」，`A11yController.repairBinding()`
+  移除再重新加入；打开 App 时自动尝试一次。
+- **文案**：`SkipLabelMatcher` 接受「跳过 / 跳过广告 / 关闭广告 / Skip / Skip Ad」及
+  「跳过 5s / 跳过广告10秒 / Skip in 5s」等倒计时变体；拒绝「关闭」「摇一摇」「点击查看」。
 
 **为什么只点这几个词**：这些是用户本来就会手动点的控件，点击它们不改变广告的曝光/点击
 统计口径。点广告本体或广告内的"关闭 X"才是伪造点击，本项目不做。

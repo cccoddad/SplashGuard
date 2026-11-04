@@ -19,7 +19,7 @@ DNS 层：VpnService 只接管 DNS（虚拟 DNS + 常见公共 DNS 的 /32）
        命中规则 → 本机返回 0.0.0.0 / NXDOMAIN
        未命中   → 转发上游 DNS
 
-无障碍层：冷启动窗口切换后 1.5s 内扫描
+无障碍层：冷启动窗口切换后 6 秒轮询（STATE/WINDOWS 触发，不监听 CONTENT）
          只点小尺寸的「跳过 / 关闭广告 / Skip」控件
 ```
 
@@ -64,6 +64,8 @@ DNS 层：VpnService 只接管 DNS（虚拟 DNS + 常见公共 DNS 的 /32）
 
 ### 当前优先修复（来自 `docs/project-review.md`）
 
+> v0.1.6 已先处理「更新后无障碍全部失效」与「系统无障碍按钮」；以下 DNS / 规则项仍待办。
+
 1. 常见公共 DNS 的 `/32` 路由会黑洞非 DNS 流量：移除，或实现完整 UDP/TCP 转发。
 2. TCP 53 与 4 KB 响应缓冲：补 TCP 处理 / 65535 缓冲 / TC 位 / TTL 感知缓存。
 3. 内置规则不可单独关闭、没有 allowlist：加高优先级 allowlist 与规则分组开关。
@@ -77,8 +79,9 @@ DNS 层：VpnService 只接管 DNS（虚拟 DNS + 常见公共 DNS 的 /32）
 2. **先定位再修**：读日志、读代码、复现问题；禁止“试试看”。
 3. **每一步给可验证结果**：命令、输出、截图、logcat 至少给一样。
 4. **改完必须回归**：
-   - `./gradlew test`（27 项单测，后续会增加）
-   - 无障碍 7 场景：`skip` / `skipcount` / `delay` 点中；`huge` / `other` / `ad` 不点；`shake` 只点跳过
+   - `./gradlew test`（v0.1.6 为 40 项单测，后续继续增加）
+   - 无障碍 9 场景：`skip` / `skipcount` / `delay` / `late` / `deep` 点中；`huge` / `other` / `ad` 不点；`shake` 只点跳过
+     （同一测试包连续启动需间隔 >6 秒，否则会被窗口状态机判为同一窗口）
    - 一次真实冷启动；性能改动还要测**完全空闲**状态
 5. **没验证不能说“已修复”**。可以说“改好了，但还没在真机验证”。
 6. **改版本号时**同步 `CHANGELOG.md`、`docs/real-device-guide.md`、README。
@@ -102,12 +105,16 @@ DNS 层：VpnService 只接管 DNS（虚拟 DNS + 常见公共 DNS 的 /32）
 2. `<application>` 必须声明 `android:name=".App"`，否则 `Application.onCreate` 是死代码。
 3. 无障碍向上找可点击父节点时，**父节点也要过尺寸闸**，否则会点掉整块广告跳落地页。
 4. 无障碍不要监听 `TYPE_WINDOW_CONTENT_CHANGED`；滚动/视频/打字会触发全树遍历。
-5. 同包名开屏 Activity 与主页 Activity 要按 1.5 秒间隔判断“又一次启动”，否则漏点。
+5. 同包名开屏 Activity 与主页 Activity 要按 1.5 秒间隔判断“又一次启动”，否则漏点；
+   同包名事件必须**重启轮询**，只刷新时间不会让已经停掉的轮询重新跑起来。
 6. 验收不要用 `ads.pangle.io` 这类广告接口域名；用 `example.com` 做对照。
 7. 拦截响应 TTL 60 秒；关闭开关后同域名仍失败是正常缓存，不是隧道没拆干净。
 8. `MaterialAlertDialogBuilder.setView(ScrollView)` 长文本要重写 `onMeasure` 限高。
 9. 模拟器上 `am force-stop` 会重置无障碍授权；`dumpsys cpuinfo` 受 Load 影响，不可信。
-10. 更多细节见 `docs/HANDOFF-PROMPT.md` 第六节。
+10. **App 覆盖安装后，`enabled_accessibility_services` 可能仍有值，但系统已解绑服务**：
+    界面显示「已授权」、实际一次都不点。用 `A11yController.repairBinding()` 移除再重新加入；
+    打开 App 时自动尝试一次，`MY_PACKAGE_REPLACED` 只修复「原本就在列表里」的服务。
+11. 更多细节见 `docs/HANDOFF-PROMPT.md` 第六节。
 
 ## 8. 常用命令
 

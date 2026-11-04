@@ -17,6 +17,8 @@ import android.widget.TextView
  *   other     小按钮「关闭」              → 不应点击（文案不在白名单）
  *   ad        可点击的整块广告 + 无跳过   → 不应点击
  *   delay     跳过按钮延迟 600ms 才出现   → 应被点击（验证抢跑轮询）
+ *   late      跳过按钮延迟 2500ms 才出现  → 应被点击（验证 6 秒窗口）
+ *   deep      跳过按钮嵌在 6 层容器里     → 应被点击（验证节点上限/祖先深度）
  *   shake     「摇一摇跳转详情」+「跳过」 → 只点跳过，不碰摇一摇
  *
  * 点击后写 logcat：tag=FakeSplash, msg=CLICKED:<variant>
@@ -77,6 +79,27 @@ class FakeSplashActivity : Activity() {
                 btn.text = "跳过"
                 btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                 root.postDelayed({ placeTopRight(root, btn, dp(60), dp(28)) }, 600)
+            }
+            "late" -> {
+                // 2.5 秒才出现：v0.1.5 的 1.5 秒窗口会漏掉，v0.1.6 的 6 秒窗口应点中
+                btn.text = "跳过"
+                btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                root.postDelayed({ placeTopRight(root, btn, dp(60), dp(28)) }, 2500)
+            }
+            "deep" -> {
+                // 跳过按钮在 6 层容器里：验证 BFS 节点上限与祖先查找深度
+                var parent: FrameLayout = root
+                repeat(5) {
+                    val child = FrameLayout(this)
+                    parent.addView(child, FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    ))
+                    parent = child
+                }
+                btn.text = "跳过"
+                btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                placeTopRight(parent, btn, dp(60), dp(28))
             }
             "shake" -> {
                 // 左上角「摇一摇跳转详情」—— 越像广告越好，验证不会被误点

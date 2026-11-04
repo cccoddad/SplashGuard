@@ -1,5 +1,38 @@
 # 变更记录
 
+## v0.1.6 — 修复更新后无障碍「全部不跳过」+ 隐藏系统无障碍按钮（2026-11-04）
+
+真机反馈：装 0.1.5 后，即使重新打开无障碍权限，所有 App 的开屏都不再自动跳过。
+
+**根因（两条叠加）**
+
+1. 0.1.5 把监听收窄为 `TYPE_WINDOW_STATE_CHANGED` + 1.5 秒窗口。Android 16 / HyperOS 冷启动不一定发 STATE 事件，且跳过按钮常晚于 1.5 秒；窗口内没扫到就彻底不点。
+2. App 覆盖安装后，系统可能保留 `enabled_accessibility_services` 但解绑服务。界面显示「已授权」，实际服务没有运行；0.1.5 没有检测/修复这个状态。
+
+**修复**
+
+- 同时监听 `TYPE_WINDOW_STATE_CHANGED` 和 `TYPE_WINDOWS_CHANGED`；仍**不监听** `TYPE_WINDOW_CONTENT_CHANGED`（遵守 AGENTS.md 红线）。
+- 轮询窗口 1.5s → 6s：0–600ms 每 100ms，600–2000ms 每 250ms，2000–6000ms 每 800ms；节点上限 150 → 400，祖先深度 4 → 8。
+- 同包名窗口事件改为「重启轮询」而不是只更新时间；回桌面/打开本 App 时重置窗口。
+- 新增 `A11yController`：检测「已授权但未绑定」，通过 `WRITE_SECURE_SETTINGS` 移除/重新加入服务。打开 App 时自动尝试一次；`MY_PACKAGE_REPLACED` 也会自动修复（仅当服务原本就在列表里，避免把用户主动关掉的服务重新打开）。
+- 首页新增「今日跳过」；「自动跳过」按钮显示「开 / 未连接」。
+- 诊断报告新增服务连接状态、最近事件/扫描/点击、今日跳过、系统无障碍快捷方式/按钮目标、最近无障碍事件流。
+- 新增「一键隐藏系统无障碍按钮」：识别系统的无障碍快捷方式，关掉后不影响自动跳过；未授予 `WRITE_SECURE_SETTINGS` 时给出一次性 ADB 授权命令。
+- ADB 无障碍命令改为「先移除再追加」，保留 TalkBack 等其他服务，同时修复「已授权但未绑定」的状态。
+
+**验证**
+
+- 单测 40 项全绿（新增 `SkipLabelMatcher` 6 项、`SkipWindowTracker` 7 项）。
+- API 34 模拟器 9 场景：`skip` / `skipcount` / `delay` / `late`（按钮 2.5s 后出现）/ `deep`（6 层容器）/ `shake` 点中；`huge` / `other` / `ad` 不点。
+- 更新 APK 后服务恢复绑定，首页显示「自动跳过 · 开」，`skip` 场景恢复点击。
+- 一键隐藏：`accessibility_shortcut_enabled=0`、`accessibility_button_targets=null`，`enabled_accessibility_services` 仍包含本服务，`skip` 仍点中。
+- 空闲 10 秒：本 App 进程 utime+stime 增量 = 0 ticks。
+- **真机（小米 13 Pro / Android 16）待用户安装后确认。**
+
+**验收注意**
+
+连续启动同一个测试包时，两次之间需间隔 >6 秒；否则窗口状态机会把它判为「同一窗口、已点过」（这是防重复点击的设计行为）。
+
 ## v0.1.5 — 修复 tun 读循环空转（耗电/发烫根因）（2026-11-04）
 
 真机反馈：手机发烫、卡顿，系统耗电统计里 SplashGuard 占 31.19%，后台 CPU 时间 2 分 48 秒。

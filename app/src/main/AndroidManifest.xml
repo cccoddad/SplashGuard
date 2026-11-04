@@ -10,6 +10,15 @@
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
+    <!--
+      可选：用于「一键隐藏系统无障碍按钮 / 自动开关无障碍服务」。
+      普通安装不会自动授予；用户需在电脑上执行一次
+      adb shell pm grant com.splashguard.app android.permission.WRITE_SECURE_SETTINGS
+      不授权时，App 仍会给出系统设置跳转和 ADB 命令，功能降级但不影响使用。
+    -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <application
         android:name=".App"

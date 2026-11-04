@@ -13,7 +13,7 @@
 **SplashGuard** —— 一个只在本地运行的安卓开屏广告拦截器。
 
 - 项目路径：`D:\vs-document\SplashGuard`（Git 已初始化，`git log --oneline` 可看完整提交历史）
-- 当前版本：`0.1.5`（versionCode 5），APK 4.6 MB，包名 `com.splashguard.app`
+- 当前版本：`0.1.6`（versionCode 6），APK 4.8 MB，包名 `com.splashguard.app`
 - 技术栈：Kotlin + Gradle 8.14.3 + AGP 8.10.1，minSdk 26 / targetSdk 34 / compileSdk 36
 - 用户设备：**小米 13 Pro（HyperOS）**
 
@@ -35,7 +35,7 @@
 5. **保持轻量**：APK 不要超过 8 MB，不引入 Room / Retrofit / 协程全家桶这类重型依赖。
    这个 App 的卖点是"小而干净"。
 
-## 三、代码地图（17 个 Kotlin 文件，全部在 `app/src/main/java/com/splashguard/app/`）
+## 三、代码地图（21 个 Kotlin 文件，全部在 `app/src/main/java/com/splashguard/app/`）
 
 | 文件 | 职责 |
 |---|---|
@@ -44,7 +44,11 @@
 | `net/PacketBuilder.kt` | 手工拼 IPv4 + UDP 头，回写 tun |
 | `rules/DomainMatcher.kt` | HashSet 后缀匹配（写 `example.com` 命中 `a.b.example.com`，不命中 `notexample.com`） |
 | `rules/RuleStore.kt` | 内置规则（assets）+ 用户自定义规则的合并与热加载 |
-| `a11y/SkipAccessibilityService.kt` | 无障碍自动点「跳过」，含防误点四道闸 |
+| `a11y/SkipAccessibilityService.kt` | 无障碍自动点「跳过」：STATE/WINDOWS 事件 + 6 秒轮询 + 防误点尺寸闸 |
+| `a11y/SkipLabelMatcher.kt` | 纯函数「跳过」文案匹配，含「跳过 5s / Skip in 5s」倒计时变体（可单测） |
+| `a11y/SkipWindowTracker.kt` | 纯函数窗口状态机：新窗口 / 同包名重启轮询 / 点击冷却（可单测） |
+| `a11y/A11yState.kt` | 无障碍运行态与最近事件（首页「开/未连接」、诊断报告用） |
+| `a11y/A11yController.kt` | 读写系统无障碍设置：修复「已授权但未绑定」、隐藏系统无障碍按钮 |
 | `log/BlockLog.kt` | 拦截日志：内存环形缓冲（200 条）+ 私有目录 TSV 落盘（400 行） |
 | `diag/DiagnosticReport.kt` | 生成诊断报告（机型/ROM/规则/分应用/无障碍/日志），供真机验收回传 |
 | `core/Prefs.kt` | 唯一的配置读写入口（SharedPreferences） |
@@ -64,10 +68,13 @@
 - DNS 分流：打开网页时 tun0 只 +91B，物理网卡 +162KB —— 证明非 DNS 流量确实没过隧道
 - 规则：命中 / 子域命中 / 父域不误杀 / 大小写不敏感 / 自定义规则热生效
 - 分应用：`dumpsys connectivity` 确认 `Uids: <{10148-10148}>` 生效
-- 无障碍 7 个场景全对：`skip` / `skipcount` / `delay`（按钮延迟 600ms）点中，
+- 无障碍 9 个场景全对：`skip` / `skipcount` / `delay`（600ms）/ `late`（2500ms）/ `deep`（6 层容器）点中，
   `huge`（全宽按钮）/ `other`（"关闭"文案）/ `ad`（整块广告）不点，
   `shake`（"摇一摇"与"跳过"并存）只点跳过
-- 单测 27 项全绿（DNS 报文 10 / 封包 5 / 规则 12）
+- v0.1.6 修复「更新 App 后所有 App 都不跳过」：STATE|WINDOWS 双事件 + 6 秒轮询 + 更新后自动重新绑定；
+  首页显示「自动跳过 · 开 / 未连接」，诊断报告含连接状态与最近事件/扫描/点击
+- 一键隐藏系统「无障碍快捷方式」按钮（不是本 App 的悬浮窗），关掉后自动跳过不受影响
+- 单测 40 项全绿（DNS 报文 10 / 封包 5 / 规则 12 / 文案匹配 6 / 窗口状态机 7）
 - 修过的 P0：`tun-reader` 读循环空转，空闲时烧满一个核（详见第六节）
 
 ## 五、现在要做的两件事（用户明确提出的目标）
@@ -156,6 +163,15 @@
    让刚用 adb 授权的无障碍"看起来没生效"；`dumpsys cpuinfo` 在模拟器上受 Load 影响极大，
    **不可信**，要用 `/proc/<pid>/task/*/stat` 的 utime+stime 逐线程采样。
 
+10. **App 覆盖安装后无障碍「显示已授权、实际不点」**：`enabled_accessibility_services` 里
+    可能仍有本服务，但系统已解绑。`A11yController.repairBinding()` 会移除再重新加入；
+    打开 App 时自动尝试一次，`MY_PACKAGE_REPLACED` 只修复「原本就在列表里」的服务。
+    这是 v0.1.5 用户反馈「更新后所有 App 都不跳过」的两条根因之一（另一条是只监听
+    STATE 事件 + 1.5 秒窗口太短）。
+
+11. **无障碍验收同一测试包连续启动要间隔 >6 秒**：窗口状态机把 6 秒内的同包名启动
+    视为同一窗口，已点过就不再点（防重复点击）。测试脚本连续跑会误判为“没点中”。
+
 ## 七、能力边界（必须主动告诉用户，不要回避）
 
 | 场景 | 为什么做不到 |
@@ -176,7 +192,7 @@
    - 分流是否干净：对比 `/sys/class/net/tun0/statistics/rx_bytes` 与物理网卡
    - CPU 谁在烧：逐线程读 `/proc/<pid>/task/*/stat`
    - 无障碍是否点击：假开屏 App `splashtest/` 会往 logcat 写 `FakeSplash:CLICKED:<variant>`
-4. **改完必须回归**：单测 + 无障碍 7 场景 + 一次真实冷启动。省电优化尤其要测空闲态。
+4. **改完必须回归**：单测 + 无障碍 9 场景 + 一次真实冷启动。省电优化尤其要测空闲态。
 5. **不要在没验证的情况下说"已修复"**。宁可说"改好了但还没在真机验证"。
 
 ## 九、构建与交付
@@ -200,10 +216,10 @@ dist/SplashGuard-<版本>.apk     # 同时复制一份到桌面，并压一个 z
 
 接手后不要急着写代码，按顺序：
 
-1. **读** `docs/real-device-guide.md`、`docs/tech-design.md`、`CHANGELOG.md`（尤其 v0.1.5），
+1. **读** `docs/real-device-guide.md`、`docs/tech-design.md`、`CHANGELOG.md`（尤其 v0.1.6），
    再读上面列的 5 个核心文件：`SplashGuardVpnService.kt`、`SkipAccessibilityService.kt`、
    `DnsPacket.kt`、`RuleStore.kt`、`DiagnosticReport.kt`。
-2. **跑一遍** `gradle test assembleRelease`，确认构建和 27 项单测在你手上是绿的。
+2. **跑一遍** `gradle test assembleRelease`，确认构建和 40 项单测在你手上是绿的。
 3. **给我一份方案**：针对目标 A 和目标 B，分别列出「打算做什么 / 预期提升多少 / 怎么做验证 /
    可能的风险」，等我确认后再动手。
 

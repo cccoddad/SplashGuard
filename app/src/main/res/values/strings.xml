@@ -37,6 +37,7 @@
 
     <string name="stat_today">今日拦截</string>
     <string name="stat_rules">生效规则</string>
+    <string name="stat_today_skip">今日跳过</string>
 
     <string name="section_recent">最近拦截</string>
     <string name="recent_empty">还没有拦截记录。\n开启后随便打开一个 App 试试。</string>
@@ -56,6 +57,19 @@
     <string name="a11y_copy_adb">复制 ADB 命令</string>
     <string name="toast_adb_copied">命令已复制，在电脑上用 adb 执行后重启 App</string>
     <string name="toast_open_settings_failed">无法打开设置，请手动进入 系统设置 → 无障碍</string>
+
+    <string name="a11y_not_connected_title">自动跳过没有运行</string>
+    <string name="a11y_not_connected_body">系统显示无障碍已授权，但服务没有连上。更新 App 后 HyperOS 经常会把无障碍服务解绑。\n\n点「一键修复」通常可以恢复；如果不行，到系统设置里把「SplashGuard 自动跳过」关掉再打开，或复制 ADB 命令在电脑上执行。</string>
+    <string name="a11y_repair">一键修复</string>
+    <string name="toast_a11y_repairing">正在重新绑定无障碍服务…</string>
+    <string name="toast_a11y_repair_failed">修复失败，请到系统设置里关闭再开启本服务</string>
+
+    <string name="a11y_button_title">屏幕上的无障碍按钮</string>
+    <string name="a11y_button_body">这个悬浮按钮是 Android 系统的「无障碍快捷方式」，不是 SplashGuard 画的悬浮窗。\n\n关掉它不会关掉自动跳过——无障碍服务会继续工作。\n\n如果「一键隐藏」不可用，先复制并执行一次 ADB 授权命令：\nadb shell pm grant com.splashguard.app android.permission.WRITE_SECURE_SETTINGS</string>
+    <string name="a11y_button_hide">一键隐藏</string>
+    <string name="a11y_button_copy_grant">复制授权命令</string>
+    <string name="toast_a11y_button_hidden">系统无障碍按钮已隐藏，自动跳过不受影响</string>
+    <string name="toast_a11y_button_hide_failed">写入失败，请在系统设置里手动关闭「无障碍快捷方式」</string>
 
     <string name="settings_mode">拦截方式</string>
     <string name="mode_zero">返回 0.0.0.0（推荐）</string>

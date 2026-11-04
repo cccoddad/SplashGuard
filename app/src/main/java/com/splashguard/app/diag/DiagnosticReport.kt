@@ -4,7 +4,9 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
+import com.splashguard.app.a11y.A11yState
 import com.splashguard.app.core.BlockMode
 import com.splashguard.app.core.Prefs
 import com.splashguard.app.log.BlockLog
@@ -106,7 +108,34 @@ object DiagnosticReport {
         sb.appendLine("[无障碍 / 自动跳过]")
         val a11yOn = isA11yEnabled(context)
         sb.appendLine("系统已授权: ${yesNo(a11yOn)}")
-        sb.appendLine("App 内记录: ${yesNo(prefs.a11yEnabled)}")
+        sb.appendLine("服务已连接: ${yesNo(A11yState.connected)}")
+        sb.appendLine("连接时间: ${formatWall(A11yState.connectedAt)}")
+        sb.appendLine(
+            "最近事件: ${formatWall(A11yState.lastEventAt)} / " +
+                "${A11yState.lastEventPkg ?: "-"} / ${A11yState.eventTypeName(A11yState.lastEventType)}"
+        )
+        sb.appendLine(
+            "最近扫描: ${formatWall(A11yState.lastScanAt)} / " +
+                "visited=${A11yState.lastScanVisited} / found=${A11yState.lastScanFound}"
+        )
+        sb.appendLine("最近点击: ${formatWall(A11yState.lastClickAt)} / ${A11yState.lastClickPkg ?: "-"}")
+        sb.appendLine("事件/扫描/点击: ${A11yState.eventCount} / ${A11yState.scanCount} / ${A11yState.clickCount}")
+        sb.appendLine("今日跳过: ${prefs.todaySkipCount()}")
+        sb.appendLine("最近跳过: ${formatWall(prefs.lastSkipAt())} / ${prefs.lastSkipPkg() ?: "-"}")
+        sb.appendLine("系统无障碍快捷方式: ${yesNo(secureInt(context, "accessibility_shortcut_enabled") == 1)}")
+        sb.appendLine("快捷方式目标: ${secureString(context, "accessibility_shortcut_target_service")}")
+        sb.appendLine("按钮目标: ${secureString(context, "accessibility_button_targets")}")
+        sb.appendLine("WRITE_SECURE_SETTINGS: ${yesNo(hasWriteSecureSettings(context))}")
+        sb.appendLine()
+
+        // ---- 无障碍最近事件（只在本机内存，最多 60 行） ----
+        sb.appendLine("[最近无障碍事件]（最新在下）")
+        val a11yLines = A11yState.recent()
+        if (a11yLines.isEmpty()) {
+            sb.appendLine("(无)")
+        } else {
+            a11yLines.forEach { sb.appendLine(it) }
+        }
         sb.appendLine()
 
         // ---- 计数 ----
@@ -203,6 +232,22 @@ object DiagnosticReport {
     }.getOrDefault(pkg)
 
     private fun yesNo(b: Boolean) = if (b) "是" else "否"
+
+    private fun formatWall(ms: Long): String =
+        if (ms <= 0L) "-" else stampFull.format(Date(ms))
+
+    private fun secureString(context: Context, key: String): String = runCatching {
+        Settings.Secure.getString(context.contentResolver, key)
+    }.getOrNull() ?: "-"
+
+    private fun secureInt(context: Context, key: String): Int = runCatching {
+        Settings.Secure.getInt(context.contentResolver, key, -1)
+    }.getOrDefault(-1)
+
+    private fun hasWriteSecureSettings(context: Context): Boolean = runCatching {
+        context.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) ==
+            PackageManager.PERMISSION_GRANTED
+    }.getOrDefault(false)
 
     private fun pad(s: String, width: Int): String {
         // 中文按 2 个宽度算，保证表格对齐
