@@ -1,0 +1,87 @@
+# SplashGuard 内置开屏广告域名种子库
+#
+# 格式：一行一条，后缀匹配（写 example.com 会命中 a.b.example.com）
+# '#' 开头为注释。兼容 AdBlock 写法 ||domain^，解析时会自动归一化。
+#
+# 【重要】宁缺毋滥。下面标注 [高风险] 的域名同时承担正常业务，
+# 默认注释掉，需要你自行判断是否开启——误封会导致图片/视频加载失败。
+#
+# 版本：seed-1
+
+# ---------- 穿山甲 / 字节跳动广告 SDK ----------
+pangolin-sdk-toutiao.com
+pangolin-sdk-toutiao-b.com
+pglstatp-toutiao.com
+ad.snssdk.com
+pangle.io
+gromore.pangle.io
+ad.toutiao.com
+# [高风险] 字节公共图片/静态资源 CDN，误封会导致头条系图片大面积失败
+# pstatp.com
+
+# ---------- 优量汇 / 腾讯广告 ----------
+gdt.qq.com
+e.qq.com
+pgdt.gtimg.com
+ad.qq.com
+adsmind.gdtimg.com
+# [高风险] 腾讯图片 CDN，误封会导致微信/QQ 图片失败
+# qpic.cn
+
+# ---------- 快手广告 ----------
+adkwai.com
+ad.kuaishou.com
+# [高风险] 快手视频/图片 CDN，误封会导致视频无法播放
+# kwaicdn.com
+
+# ---------- 百度联盟 ----------
+cpro.baidu.com
+pos.baidu.com
+mobads.baidu.com
+mobads-logs.baidu.com
+
+# ---------- 阿里妈妈 / 阿里广告 ----------
+tanx.com
+alimama.com
+afp.alibaba.com
+
+# ---------- 小米 / OPPO / vivo / 华为 广告联盟 ----------
+ad.xiaomi.com
+api.ad.xiaomi.com
+adsfs.oppomobile.com
+adx.oppomobile.com
+ad.vivo.com.cn
+pps.vivo.com.cn
+ads.hpplay.com
+
+# ---------- 聚合广告平台 ----------
+mintegral.com
+mbridgelog.com
+applovin.com
+unityads.unity3d.com
+adcolony.com
+vungle.com
+chartboost.com
+ironsrc.com
+supersonicads.com
+tapjoy.com
+inmobi.com
+startapp.com
+adcash.com
+
+# ---------- 国际通用广告网络 ----------
+doubleclick.net
+googleads.g.doubleclick.net
+adservice.google.com
+pagead2.googlesyndication.com
+ads.yahoo.com
+ads.linkedin.com
+ads.twitter.com
+
+# ---------- 其他常见开屏广告位 ----------
+g.163.com
+adtrack.kingsoft.com
+ad.weibo.com
+sax.sina.com.cn
+afp.csdn.net
+c.admaster.com.cn
