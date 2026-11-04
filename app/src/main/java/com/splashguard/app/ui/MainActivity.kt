@@ -1,20 +1,30 @@
 package com.splashguard.app.ui
 
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.graphics.Typeface
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
+import android.view.View.MeasureSpec
 import android.view.accessibility.AccessibilityManager
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.splashguard.app.R
 import com.splashguard.app.core.Prefs
 import com.splashguard.app.databinding.ActivityMainBinding
+import com.splashguard.app.diag.DiagnosticReport
 import com.splashguard.app.log.BlockLog
 import com.splashguard.app.net.SplashGuardVpnService
 import com.splashguard.app.rules.RuleStore
@@ -76,6 +86,7 @@ class MainActivity : AppCompatActivity() {
         b.btnApps.setOnClickListener { startActivity(Intent(this, AppPickerActivity::class.java)) }
         b.btnRules.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         b.btnA11y.setOnClickListener { openAccessibilitySettings() }
+        b.btnExport.setOnClickListener { exportReport() }
         b.btnClear.setOnClickListener {
             BlockLog.clear()
             prefs.resetTodayCount()
@@ -185,6 +196,67 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }.onFailure {
             toast("无法打开无障碍设置，请手动进入 系统设置 → 无障碍")
+        }
+    }
+
+    // ---------------- 诊断报告（真机验收用） ----------------
+
+    private fun exportReport() {
+        val text = runCatching { DiagnosticReport.build(this) }.getOrElse { e ->
+            toast(getString(R.string.toast_export_failed, e.message ?: e.javaClass.simpleName))
+            return
+        }
+        val density = resources.displayMetrics.density
+        val pad = (14 * density).toInt()
+
+        val body = TextView(this).apply {
+            this.text = text
+            textSize = 9.5f
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            setPadding(pad, pad, pad, pad)
+        }
+        // 限制高度，否则正文会把「复制/分享/关闭」按钮挤出屏幕
+        val maxBodyHeight = (resources.displayMetrics.heightPixels * 0.42f).toInt()
+        val scroller = object : ScrollView(this) {
+            override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+                super.onMeasure(
+                    widthSpec,
+                    MeasureSpec.makeMeasureSpec(maxBodyHeight, MeasureSpec.AT_MOST)
+                )
+            }
+        }.apply { addView(body) }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.export_title)
+            .setMessage(R.string.export_hint)
+            .setView(scroller)
+            .setPositiveButton(R.string.action_share) { _, _ -> shareReport(text) }
+            .setNeutralButton(R.string.action_copy) { _, _ -> copyReport(text) }
+            .setNegativeButton(R.string.action_close, null)
+            .show()
+    }
+
+    private fun copyReport(text: String) {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+        cm.setPrimaryClip(ClipData.newPlainText("SplashGuard report", text))
+        toast(getString(R.string.toast_copied))
+    }
+
+    private fun shareReport(text: String) {
+        runCatching {
+            val f = DiagnosticReport.writeToFile(this, text)
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", f)
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "SplashGuard 诊断报告")
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_TEXT, text)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(send, getString(R.string.share_chooser)))
+        }.onFailure { e ->
+            toast(getString(R.string.toast_export_failed, e.message ?: e.javaClass.simpleName))
         }
     }
 

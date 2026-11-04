@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 只暴露私有目录下的 reports/，用于把诊断报告分享出去 -->
+    <files-path
+        name="reports"
+        path="reports/" />
+</paths>

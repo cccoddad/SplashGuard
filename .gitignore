@@ -16,3 +16,6 @@ test.log
 __pycache__/
 *.pyc
 build_test.log
+
+# 交付包（体积大，不进版本库，由构建产出）
+dist/

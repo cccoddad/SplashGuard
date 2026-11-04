@@ -16,6 +16,8 @@ import android.widget.TextView
  *   huge      全宽大按钮「跳过广告」      → 不应点击（尺寸守卫生效）
  *   other     小按钮「关闭」              → 不应点击（文案不在白名单）
  *   ad        可点击的整块广告 + 无跳过   → 不应点击
+ *   delay     跳过按钮延迟 600ms 才出现   → 应被点击（验证抢跑轮询）
+ *   shake     「摇一摇跳转详情」+「跳过」 → 只点跳过，不碰摇一摇
  *
  * 点击后写 logcat：tag=FakeSplash, msg=CLICKED:<variant>
  */
@@ -70,6 +72,27 @@ class FakeSplashActivity : Activity() {
                 btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                 placeTopRight(root, btn, dp(60), dp(28))
             }
+            "delay" -> {
+                // 跳过按钮延迟 600ms 才渲染：模拟真实广告 SDK 的异步填充
+                btn.text = "跳过"
+                btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                root.postDelayed({ placeTopRight(root, btn, dp(60), dp(28)) }, 600)
+            }
+            "shake" -> {
+                // 左上角「摇一摇跳转详情」—— 越像广告越好，验证不会被误点
+                val shake = TextView(this).apply {
+                    text = "摇一摇跳转详情"
+                    setTextColor(Color.WHITE)
+                    gravity = Gravity.CENTER
+                    isClickable = true
+                    setBackgroundColor(Color.parseColor("#7A2E2E"))
+                    setOnClickListener { Log.i(TAG, "CLICKED:shake-ad") }
+                }
+                placeTopLeft(root, shake, dp(150), dp(30))
+                btn.text = "跳过"
+                btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                placeTopRight(root, btn, dp(60), dp(28))
+            }
             else -> { /* ad: 只有广告区域 */ }
         }
 
@@ -85,6 +108,14 @@ class FakeSplashActivity : Activity() {
             gravity = Gravity.TOP or Gravity.END
             topMargin = dp(48)
             marginEnd = dp(16)
+        })
+    }
+
+    private fun placeTopLeft(root: FrameLayout, v: TextView, w: Int, h: Int) {
+        root.addView(v, FrameLayout.LayoutParams(w, h).apply {
+            gravity = Gravity.TOP or Gravity.START
+            topMargin = dp(48)
+            marginStart = dp(16)
         })
     }
 

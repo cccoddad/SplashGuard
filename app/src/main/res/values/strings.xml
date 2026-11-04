@@ -8,6 +8,14 @@
     <string name="action_close">关闭</string>
     <string name="action_ok">知道了</string>
     <string name="action_clear">清空</string>
+    <string name="action_export">导出报告</string>
+    <string name="action_copy">复制全文</string>
+    <string name="action_share">分享 / 存文件</string>
+    <string name="export_title">诊断报告</string>
+    <string name="export_hint">本报告只在本机生成，不上传。长按可选中复制。</string>
+    <string name="toast_copied">报告已复制到剪贴板</string>
+    <string name="toast_export_failed">生成报告失败：%1$s</string>
+    <string name="share_chooser">把报告发出去</string>
 
     <string name="notif_channel">拦截运行状态</string>
     <string name="notif_channel_desc">显示 DNS 过滤是否正在运行</string>
@@ -66,7 +74,7 @@
 
     <string name="settings_privacy">隐私说明</string>
     <string name="privacy_title">隐私说明</string>
-    <string name="privacy_body">SplashGuard 不收集任何数据。\n\n· 无账号、无统计 SDK、无崩溃上报\n· 拦截日志只存在本机内存，最多 200 条，可一键清空\n· 唯一出站流量是未拦截域名的 DNS 转发，发往你指定的上游\n· 被拦截的域名不会发出任何请求，直接由本机返回 0.0.0.0\n\n权限用途：\n· VPN —— 接管 DNS 查询，功能基础\n· 前台服务 —— 让拦截在后台持续运行\n· 开机自启 —— 重启后恢复拦截\n· 应用列表 —— 分应用功能需要\n· 无障碍（可选，默认关）—— 只点击「跳过」按钮，不读取其他内容\n\n完整说明见项目 docs/privacy.md。</string>
+    <string name="privacy_body">SplashGuard 不收集任何数据。\n\n· 无账号、无统计 SDK、无崩溃上报\n· 拦截日志只存在本机（最近 200 条），可一键清空\n· 唯一出站流量是未拦截域名的 DNS 转发，发往你指定的上游\n· 被拦截的域名不会发出任何请求，直接由本机返回 0.0.0.0\n\n权限用途：\n· VPN —— 接管 DNS 查询，功能基础\n· 前台服务 —— 让拦截在后台持续运行\n· 开机自启 —— 重启后恢复拦截\n· 应用列表 —— 分应用功能需要\n· 无障碍（可选，默认关）—— 只点击「跳过」按钮，不读取其他内容\n\n完整说明见项目 docs/privacy.md。</string>
 
     <string name="apps_mode_all">全部应用</string>
     <string name="apps_mode_selected">仅选中的应用</string>

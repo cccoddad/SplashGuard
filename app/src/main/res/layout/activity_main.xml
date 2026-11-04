@@ -212,9 +212,20 @@
             android:textStyle="bold" />
 
         <TextView
+            android:id="@+id/btnExport"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackground"
+            android:padding="6dp"
+            android:text="@string/action_export"
+            android:textColor="@color/brand"
+            android:textSize="12sp" />
+
+        <TextView
             android:id="@+id/btnClear"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
             android:background="?attr/selectableItemBackground"
             android:padding="6dp"
             android:text="@string/action_clear"

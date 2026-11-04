@@ -1,6 +1,7 @@
 package com.splashguard.app
 
 import android.app.Application
+import com.splashguard.app.log.BlockLog
 import com.splashguard.app.rules.RuleStore
 
 class App : Application() {
@@ -8,5 +9,7 @@ class App : Application() {
         super.onCreate()
         // 规则只在本机加载，不做任何网络请求
         RuleStore.reload(this)
+        // 日志落盘初始化：让进程被回收后仍能看到历史拦截记录
+        BlockLog.init(this)
     }
 }
