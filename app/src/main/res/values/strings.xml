@@ -50,6 +50,12 @@
     <string name="a11y_on">已开启，将在冷启动时点「跳过」</string>
     <string name="a11y_off">未开启，点击前往系统设置授权</string>
     <string name="toast_a11y_turn_off">已关闭自动跳过</string>
+    <string name="a11y_guide_title">开启自动跳过</string>
+    <string name="a11y_guide_body">点「前往系统设置」后，在「已下载的服务」里找到「SplashGuard 自动跳过」并开启。\n\n小米 / HyperOS：设置顶部搜索框直接搜「无障碍」最快；若在「已下载的服务」里看不到，往下翻找「更多已下载的服务」，侧载安装的应用常被折叠在那里。\n\n华为 / 荣耀：还要到「应用启动管理」把本应用设为手动管理并允许三项。\n\n各版本菜单文案略有差异，认准带「服务」字样的分组即可。实在找不到就点「复制 ADB 命令」，在电脑上执行后重开本 App。</string>
+    <string name="a11y_go_settings">前往系统设置</string>
+    <string name="a11y_copy_adb">复制 ADB 命令</string>
+    <string name="toast_adb_copied">命令已复制，在电脑上用 adb 执行后重启 App</string>
+    <string name="toast_open_settings_failed">无法打开设置，请手动进入 系统设置 → 无障碍</string>
 
     <string name="settings_mode">拦截方式</string>
     <string name="mode_zero">返回 0.0.0.0（推荐）</string>

@@ -190,13 +190,24 @@ class MainActivity : AppCompatActivity() {
         }
 
     private fun openAccessibilitySettings() {
-        val hint = if (isA11yEnabled) R.string.a11y_on else R.string.a11y_off
-        toast(getString(hint))
-        runCatching {
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-        }.onFailure {
-            toast("无法打开无障碍设置，请手动进入 系统设置 → 无障碍")
+        if (isA11yEnabled) {
+            toast(getString(R.string.a11y_on))
+            runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+            return
         }
+        // 各厂商把入口藏得深浅不一（小米尤其），先给一份带机型提示的引导
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.a11y_guide_title)
+            .setMessage(R.string.a11y_guide_body)
+            .setPositiveButton(R.string.a11y_go_settings) { _, _ ->
+                runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                    .onFailure { toast(getString(R.string.toast_open_settings_failed)) }
+            }
+            .setNeutralButton(R.string.a11y_copy_adb) { _, _ ->
+                copyToClipboard(ADB_A11Y_COMMAND, getString(R.string.toast_adb_copied))
+            }
+            .setNegativeButton(R.string.action_close, null)
+            .show()
     }
 
     // ---------------- 诊断报告（真机验收用） ----------------
@@ -238,9 +249,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun copyReport(text: String) {
+        copyToClipboard(text, getString(R.string.toast_copied))
+    }
+
+    private fun copyToClipboard(text: String, hint: String) {
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-        cm.setPrimaryClip(ClipData.newPlainText("SplashGuard report", text))
-        toast(getString(R.string.toast_copied))
+        cm.setPrimaryClip(ClipData.newPlainText("SplashGuard", text))
+        toast(hint)
     }
 
     private fun shareReport(text: String) {
@@ -262,5 +277,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun toast(msg: String) {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+    }
+
+    private companion object {
+        /** 系统设置里实在找不到入口时，让用户复制去电脑上用 adb 授权 */
+        const val ADB_A11Y_COMMAND =
+            "adb shell settings put secure enabled_accessibility_services " +
+                "com.splashguard.app/com.splashguard.app.a11y.SkipAccessibilityService\n" +
+                "adb shell settings put secure accessibility_enabled 1"
     }
 }

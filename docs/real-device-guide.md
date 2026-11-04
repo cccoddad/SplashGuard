@@ -1,6 +1,6 @@
 # 真机验收操作手册
 
-> 目标：把 `dist/SplashGuard-0.1.3.apk` 装到你的安卓手机上，跑完 5 步冒烟验证，
+> 目标：把 `dist/SplashGuard-0.1.4.apk` 装到你的安卓手机上，跑完 5 步冒烟验证，
 > 把「诊断报告」发回来。全程约 10 分钟，不需要电脑（有电脑更快）。
 >
 > 适用：Android 8.0（API 26）及以上。华为鸿蒙、小米、OPPO、vivo、三星、原生均可。
@@ -11,9 +11,9 @@
 
 | 项 | 值 |
 |---|---|
-| 文件 | 桌面 `SplashGuard-0.1.3.apk`（推荐）；或 `dist/SplashGuard-0.1.3.apk`（约 4.6 MB） |
+| 文件 | 桌面 `SplashGuard-0.1.4.apk`（推荐）；或 `dist/SplashGuard-0.1.4.apk`（约 4.6 MB） |
 | 包名 | `com.splashguard.app` |
-| 版本 | 0.1.3 (versionCode 3) |
+| 版本 | 0.1.4 (versionCode 3) |
 | 签名 | 自签名（非商店分发） |
 | 最低系统 | Android 8.0 |
 | 联网行为 | 只有 DNS 转发，无其他出站请求 |
@@ -33,7 +33,7 @@ adb devices
 # 应看到一行 xxxxx  device
 
 # 2. 安装
-adb install -r dist/SplashGuard-0.1.3.apk
+adb install -r dist/SplashGuard-0.1.4.apk
 # 输出 Success 即成功
 ```
 
@@ -41,21 +41,21 @@ adb install -r dist/SplashGuard-0.1.3.apk
 
 **先找到文件** —— 下面三处内容完全相同，任选一处：
 
-- 电脑桌面：`SplashGuard-0.1.3.apk`
-- 电脑桌面：`SplashGuard-0.1.3.zip`（微信专用，推荐，原因见下）
-- 项目目录：`D:\vs-document\SplashGuard\dist\SplashGuard-0.1.3.apk`
+- 电脑桌面：`SplashGuard-0.1.4.apk`
+- 电脑桌面：`SplashGuard-0.1.4.zip`（微信专用，推荐，原因见下）
+- 项目目录：`D:\vs-document\SplashGuard\dist\SplashGuard-0.1.4.apk`
 
 **微信的坑：微信会把 `.apk` 自动改名成 `.apk.1`**（防止自动安装），所以很多人发过去之后
 在手机端「找不到文件」或点开提示「无法打开」。zip 压缩包不会被改名。
 
 推荐走 zip：
 
-1. 电脑微信 →「文件传输助手」→ 发送 `SplashGuard-0.1.3.zip`
+1. 电脑微信 →「文件传输助手」→ 发送 `SplashGuard-0.1.4.zip`
 2. 手机微信里点开该 zip →「用其他应用打开」→ 选系统的「文件管理」
-3. 解压出 `SplashGuard-0.1.3.apk` → 点击安装
+3. 解压出 `SplashGuard-0.1.4.apk` → 点击安装
 4. 若提示「禁止安装未知应用」，点提示去开启本来源的安装权限，回来重试
 
-如果坚持直接传 apk：手机文件管理进 `Download/WeiXin/` 找到 `SplashGuard-0.1.3.apk.1`，
+如果坚持直接传 apk：手机文件管理进 `Download/WeiXin/` 找到 `SplashGuard-0.1.4.apk.1`，
 **重命名把结尾的 `.1` 删掉**，再点开就能装。
 
 > QQ 传文件通常不加后缀，比微信省事。也可以用手机 QQ / 钉钉的「传文件到手机」。
@@ -80,11 +80,42 @@ adb install -r dist/SplashGuard-0.1.3.apk
 
 ### ② 开启无障碍（自动跳过功能，可选但建议）
 
-路径：`系统设置 → 无障碍 → 已下载的服务 / 已安装的服务 → SplashGuard 自动跳过 → 开启`
+**最快的办法：打开 SplashGuard，点首页第三个按钮「自动跳过」** —— App 会直接跳到系统的无障碍
+设置页，还会先弹一份带机型提示的引导，不用自己一层层翻菜单。
+
+如果手动找，路径是：`系统设置 → 无障碍 → 已下载的服务 → SplashGuard 自动跳过 → 开启`
 
 - 会弹「此服务可以查看屏幕内容」的警告，这是无障碍服务的标准提示
 - 我们只做一件事：识别「跳过」两个字并点击，不读聊天记录、不读密码框
 - 不开启也能用，只是少了「自动点跳过」这一层
+- 开启成功后，首页那个按钮文字会变成「**自动跳过 · 开**」，用这个判断有没有生效
+
+#### 小米 / Redmi / HyperOS 专用（小米 13 Pro 等）
+
+小米把无障碍藏在**「更多设置」**里，而且会把侧载安装的应用折叠起来，按这个顺序试：
+
+1. 设置**顶部搜索框**直接搜「无障碍」→ 进「无障碍」→ 往下翻到「已下载的服务」
+2. 或：设置 → **更多设置** → 无障碍 → 已下载的服务
+3. **找不到就往下翻「更多已下载的服务」** —— HyperOS 常把非应用商店装的应用塞进这个折叠项，
+   这正是「列表里没有 SplashGuard」的最常见原因
+4. 确认 App 真的装上了：设置 → 应用设置 → 应用管理 → 搜 `SplashGuard`。没装上的话列表里当然没有
+
+#### 实在找不到：用电脑一条命令开启
+
+手机开 USB 调试并连电脑，在电脑上执行（App 里点「自动跳过」→「复制 ADB 命令」会自动复制这两行）：
+
+```bash
+adb shell settings put secure enabled_accessibility_services com.splashguard.app/com.splashguard.app.a11y.SkipAccessibilityService
+adb shell settings put secure accessibility_enabled 1
+```
+
+执行完回到 App 看按钮是否变成「自动跳过 · 开」。
+
+> **小米特别注意**：部分 HyperOS 版本会拦截 adb 修改 `secure` 设置，需要在
+> 开发者选项里额外打开「**USB 调试（安全设置）**」才生效（该开关要求登录小米账号）。
+> 如果执行后仍不生效，就回到上面的「更多已下载的服务」手动找。
+
+华为 / 荣耀还需要到「应用启动管理」把本应用设为手动管理、三项全允许，否则后台会被杀。
 
 ### ③ 关掉电池优化（关键，否则后台被杀）
 
