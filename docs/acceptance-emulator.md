@@ -434,3 +434,58 @@ done
 ```
 
 **真机待验证**：小米 13 Pro / Android 16 上的 VPN 空闲自关、懂球帝扫描/点击、开屏进入速度。
+
+---
+
+## 10. v0.1.8 回归计划（发热 / 点击延迟 / 摇一摇诊断）
+
+> 状态：**待执行**。本轮只完成 JVM 单测（70 项）与 release 构建，未在模拟器/真机跑无障碍场景。
+
+### 10.1 新增场景
+
+同一测试包连续启动间隔 >6 秒（窗口状态机防重复点击）。
+
+```bash
+for v in skip skipcount delay late late5000 deep bigtree closenum nonclick shake shakecd huge other ad; do
+  adb logcat -c
+  adb shell am force-stop com.splashguard.splashtest
+  adb shell am start -n com.splashguard.splashtest/.FakeSplashActivity --es variant $v
+  sleep 8.5
+  adb logcat -d -s FakeSplash:V | grep "CLICKED:"
+  adb shell am force-stop com.splashguard.splashtest
+done
+```
+
+| variant | 期望 |
+|---|---|
+| `skip` / `skipcount` / `delay` / `late` / `late5000` / `deep` / `bigtree` / `closenum` | `CLICKED:<variant>` |
+| `shake` / `shakecd` | 只出现 `CLICKED:shake`（跳过按钮），绝不出现 `CLICKED:shake-ad` |
+| `huge` / `other` / `ad` / `nonclick` | 无 `CLICKED`,尤其不能出现 `CLICKED:ad-area` |
+
+### 10.2 扫描成本与发热
+
+```bash
+# 无障碍扫描指标：导出诊断报告，看 P50/P95/平均/最大、结果计数、本次窗口延迟
+adb shell am start -n com.splashguard.app/.ui.MainActivity
+# 首页 → 导出诊断报告
+
+# 逐线程 CPU（不要用 dumpsys cpuinfo，受 Load 影响）
+PID=$(adb shell pidof com.splashguard.app)
+adb shell "cat /proc/$PID/task/*/stat" | awk '{print $1,$14,$15}' | head
+```
+
+期望（目标值，需真机确认）：
+- 扫描平均 <100ms、P95 <250ms；
+- 完全空闲 3 分钟进程 CPU% 接近 0；
+- 连续切换 10 个 App 3 分钟，扫描结果中 `系统界面` / `桌面` 计数不再增长；
+- 典型点击延迟 <500ms。
+
+### 10.3 开屏归因
+
+诊断报告新增：
+
+- `本次窗口关联拦截: N 条 / 域名...`：同一 App 在窗口开始前 3 秒到现在的 DNS 拦截；
+- `本次窗口出现摇一摇文案: 是/否`：无障碍在扫描中看到互动文案（只记录，不点击）。
+
+如果某 App 仍出现开屏且报告显示「关联拦截 >0、未点击」，说明 DNS 已拦住但素材已缓存或按钮没找到；
+如果「关联拦截 =0」，更可能是 HTTPDNS / 同域素材，需要单独分析。

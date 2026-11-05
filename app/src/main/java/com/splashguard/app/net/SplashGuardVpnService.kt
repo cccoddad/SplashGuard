@@ -22,6 +22,7 @@ import com.splashguard.app.core.BlockMode
 import com.splashguard.app.core.Const
 import com.splashguard.app.core.PerAppMode
 import com.splashguard.app.core.Prefs
+import com.splashguard.app.diag.SplashSession
 import com.splashguard.app.log.BlockLog
 import com.splashguard.app.rules.RuleStore
 import com.splashguard.app.ui.MainActivity
@@ -270,6 +271,8 @@ class SplashGuardVpnService : VpnService() {
             val blockKey = "B|" + question.name + "|" + question.qType
             cacheGet(blockKey, DnsPacket.queryId(payload))?.let { cached ->
                 DnsStats.onBlock(cacheHit = true)
+                // 缓存命中也要记归因，否则「同一个域名 60 秒内第二次查询」会让开屏归因为 0
+                SplashSession.recordBlock(pkgFor(info), question.name, rule)
                 reply(packet, cached)
                 return
             }
@@ -278,7 +281,9 @@ class SplashGuardVpnService : VpnService() {
             if (resp.isNotEmpty()) {
                 blockCachePut(blockKey, resp)
                 DnsStats.onBlock(cacheHit = false)
-                BlockLog.record(pkgFor(info), question.name, rule)
+                val pkg = pkgFor(info)
+                BlockLog.record(pkg, question.name, rule)
+                SplashSession.recordBlock(pkg, question.name, rule)
                 prefs.bumpBlockCount()
             }
             reply(packet, resp)

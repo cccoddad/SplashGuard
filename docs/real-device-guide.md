@@ -1,6 +1,6 @@
 # 真机验收操作手册
 
-> 目标：把 `dist/SplashGuard-0.1.7.apk` 装到你的安卓手机上，跑完 5 步冒烟验证，  
+> 目标：把 `dist/SplashGuard-0.1.8.apk` 装到你的安卓手机上，跑完 5 步冒烟验证，  
 > 把「诊断报告」发回来。全程约 10 分钟，不需要电脑（有电脑更快）。
 >
 > 适用：Android 8.0（API 26）及以上。华为鸿蒙、小米、OPPO、vivo、三星、原生均可。
@@ -11,9 +11,9 @@
 
 | 项    | 值                                                                       |
 | ---- | ----------------------------------------------------------------------- |
-| 文件   | 桌面 `SplashGuard-0.1.7.apk`（推荐）；或 `dist/SplashGuard-0.1.7.apk`（约 4.8 MB） |
+| 文件   | 桌面 `SplashGuard-0.1.8.apk`（推荐）；或 `dist/SplashGuard-0.1.8.apk`（约 4.8 MB） |
 | 包名   | `com.splashguard.app`                                                   |
-| 版本   | 0.1.7 (versionCode 7)                                                   |
+| 版本   | 0.1.8 (versionCode 8)                                                   |
 | 签名   | 自签名（非商店分发）                                                              |
 | 最低系统 | Android 8.0                                                             |
 | 联网行为 | 只有 DNS 转发，无其他出站请求                                                       |
@@ -33,7 +33,7 @@ adb devices
 # 应看到一行 xxxxx  device
 
 # 2. 安装
-adb install -r dist/SplashGuard-0.1.7.apk
+adb install -r dist/SplashGuard-0.1.8.apk
 # 输出 Success 即成功
 ```
 
@@ -41,21 +41,21 @@ adb install -r dist/SplashGuard-0.1.7.apk
 
 **先找到文件** —— 下面三处内容完全相同，任选一处：
 
-- 电脑桌面：`SplashGuard-0.1.7.apk`
-- 电脑桌面：`SplashGuard-0.1.7.zip`（微信专用，推荐，原因见下）
-- 项目目录：`D:\vs-document\SplashGuard\dist\SplashGuard-0.1.7.apk`
+- 电脑桌面：`SplashGuard-0.1.8.apk`
+- 电脑桌面：`SplashGuard-0.1.8.zip`（微信专用，推荐，原因见下）
+- 项目目录：`D:\vs-document\SplashGuard\dist\SplashGuard-0.1.8.apk`
 
 **微信的坑：微信会把 `.apk` 自动改名成 `.apk.1`**（防止自动安装），所以很多人发过去之后  
 在手机端「找不到文件」或点开提示「无法打开」。zip 压缩包不会被改名。
 
 推荐走 zip：
 
-1. 电脑微信 →「文件传输助手」→ 发送 `SplashGuard-0.1.7.zip`
+1. 电脑微信 →「文件传输助手」→ 发送 `SplashGuard-0.1.8.zip`
 2. 手机微信里点开该 zip →「用其他应用打开」→ 选系统的「文件管理」
-3. 解压出 `SplashGuard-0.1.7.apk` → 点击安装
+3. 解压出 `SplashGuard-0.1.8.apk` → 点击安装
 4. 若提示「禁止安装未知应用」，点提示去开启本来源的安装权限，回来重试
 
-如果坚持直接传 apk：手机文件管理进 `Download/WeiXin/` 找到 `SplashGuard-0.1.7.apk.1`，  
+如果坚持直接传 apk：手机文件管理进 `Download/WeiXin/` 找到 `SplashGuard-0.1.8.apk.1`，  
 **重命名把结尾的 `.1` 删掉**，再点开就能装。
 
 > QQ 传文件通常不加后缀，比微信省事。也可以用手机 QQ / 钉钉的「传文件到手机」。
@@ -114,7 +114,7 @@ adb shell 'comp=com.splashguard.app/com.splashguard.app.a11y.SkipAccessibilitySe
 
 #### 更新 App 后「一个都不跳过」怎么办
 
-v0.1.7 会自己处理大部分情况：
+v0.1.7 起会自己处理大部分情况：
 
 - 打开 SplashGuard，如果按钮显示「**自动跳过 · 未连接**」，点它 →「一键修复」（需要下面的一次性授权）。
 - 没给权限时，点「复制 ADB 命令」，在电脑上执行上面的命令即可。
@@ -308,7 +308,7 @@ VPN 没建立。依次检查：
 1. 系统设置 → 无障碍 → 确认 SplashGuard 自动跳过是「已开启」状态（不是只是装了）
 2. **看 App 首页按钮是「自动跳过 · 开」还是「自动跳过 · 未连接」**：
    - 未连接 = 系统列表里有、但服务没运行。点按钮 →「一键修复」，或复制 ADB 命令执行
-   - 更新 App 后最常见的就是这个状态；v0.1.7 会在打开 App 时自动尝试修复一次
+   - 更新 App 后最常见的就是这个状态；v0.1.7 起会在打开 App 时自动尝试修复一次
 3. 目标 App 的开屏是自绘的 → 无障碍树里没有「跳过」文字节点，读不到就是点不到
 
 ### 后台一段时间后失效

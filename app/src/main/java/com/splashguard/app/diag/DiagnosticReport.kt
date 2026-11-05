@@ -7,6 +7,7 @@ import android.os.Build
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import com.splashguard.app.a11y.A11yState
+import com.splashguard.app.a11y.ScanMetrics
 import com.splashguard.app.core.BlockMode
 import com.splashguard.app.core.Prefs
 import com.splashguard.app.log.BlockLog
@@ -84,8 +85,27 @@ object DiagnosticReport {
         // ---- DNS 性能 ----
         sb.appendLine("[DNS 性能]（本次进程启动以来）")
         sb.appendLine("转发次数: ${DnsStats.forwardCount} / 失败: ${DnsStats.forwardFailures}")
-        sb.appendLine("平均转发耗时: ${DnsStats.avgForwardMs()}ms / 最近: ${DnsStats.lastForwardMs}ms")
+        sb.appendLine(
+            "平均转发耗时: ${DnsStats.avgForwardMs()}ms / 最近: ${DnsStats.lastForwardMs}ms" +
+                " / 最大: ${DnsStats.maxForwardMs}ms"
+        )
+        sb.appendLine("耗时分布: ${bucketLine(DnsStats.BUCKET_LABELS, DnsStats.bucketCounts())}")
         sb.appendLine("拦截应答: ${DnsStats.blockTotal} / 缓存命中: ${DnsStats.blockCacheHits}")
+        sb.appendLine()
+
+        // ---- CPU ----
+        sb.appendLine("[CPU]（本次进程启动以来）")
+        sb.appendLine(
+            "进程 CPU 时间: ${CpuSampler.processCpuMs()}ms / 运行 ${CpuSampler.uptimeMs()}ms" +
+                " = ${String.format(Locale.US, "%.1f", CpuSampler.processCpuPercent())}%"
+        )
+        sb.appendLine("线程 CPU（自线程创建，Top 6）:")
+        val threads = CpuSampler.topThreads(6)
+        if (threads.isEmpty()) {
+            sb.appendLine("  (无法读取 /proc/self/task)")
+        } else {
+            threads.forEach { sb.appendLine("  - ${it.name}: ${it.cpuMs}ms") }
+        }
         sb.appendLine()
 
         // ---- 规则 ----
@@ -120,14 +140,53 @@ object DiagnosticReport {
         sb.appendLine("连接时间: ${formatWall(A11yState.connectedAt)}")
         sb.appendLine(
             "最近事件: ${formatWall(A11yState.lastEventAt)} / " +
-                "${A11yState.lastEventPkg ?: "-"} / ${A11yState.eventTypeName(A11yState.lastEventType)}"
+                "${A11yState.lastEventPkg ?: "-"} / ${A11yState.eventTypeName(A11yState.lastEventType)}" +
+                " / 动作=${A11yState.lastWindowAction}"
         )
         sb.appendLine(
             "最近扫描: ${formatWall(A11yState.lastScanAt)} / " +
+                "pkg=${A11yState.lastScanPkg ?: "-"} / t=${A11yState.lastScanTrigger} / " +
                 "visited=${A11yState.lastScanVisited} / found=${A11yState.lastScanFound} / " +
-                "耗时=${A11yState.lastScanMs}ms（平均 ${A11yState.avgScanMs()}ms）"
+                "耗时=${A11yState.lastScanMs}ms / 结果=${A11yState.lastScanOutcome.label}"
+        )
+        sb.appendLine(
+            "扫描耗时: P50=${A11yState.metrics.percentile(50)}ms / " +
+                "P95=${A11yState.metrics.percentile(95)}ms / " +
+                "平均=${A11yState.avgScanMs()}ms / 最大=${A11yState.metrics.maxMs}ms"
+        )
+        sb.appendLine(
+            "扫描分布: ${bucketLine(ScanMetrics.BUCKET_LABELS, A11yState.metrics.bucketCounts())}"
+        )
+        sb.appendLine(
+            "扫描结果: 未找到=${A11yState.outcomeCount(A11yState.ScanOutcome.NONE_FOUND)}" +
+                " / 已点击=${A11yState.outcomeCount(A11yState.ScanOutcome.CLICKED)}" +
+                " / 点击失败=${A11yState.outcomeCount(A11yState.ScanOutcome.CLICK_FAILED)}" +
+                " / 文案不可见=${A11yState.outcomeCount(A11yState.ScanOutcome.LABEL_NOT_VISIBLE)}" +
+                " / 文案超尺寸=${A11yState.outcomeCount(A11yState.ScanOutcome.LABEL_TOO_BIG)}" +
+                " / 无可点祖先=${A11yState.outcomeCount(A11yState.ScanOutcome.NO_CLICKABLE_ANCESTOR)}" +
+                " / 根包不匹配=${A11yState.outcomeCount(A11yState.ScanOutcome.WRONG_ROOT)}" +
+                " / 系统界面=${A11yState.outcomeCount(A11yState.ScanOutcome.IGNORED_WINDOW)}" +
+                " / 桌面=${A11yState.outcomeCount(A11yState.ScanOutcome.HOME_WINDOW)}"
         )
         sb.appendLine("最近点击: ${formatWall(A11yState.lastClickAt)} / ${A11yState.lastClickPkg ?: "-"}")
+        sb.appendLine("点击 action 耗时: ${A11yState.lastClickActionMs}ms")
+        sb.appendLine(
+            "本次窗口: ${A11yState.windowPkg ?: "-"} / 开始=${formatWall(A11yState.windowStartedAt)} / " +
+                "扫描=${A11yState.windowScanCount} / 首次找到=${formatWall(A11yState.windowFirstFoundAt)} / " +
+                "点击=${formatWall(A11yState.lastClickAt)} / 延迟=${windowClickLatencyMs()}"
+        )
+        val sessionBlocks = SplashSession.blocksForWindow(
+            A11yState.windowPkg, A11yState.windowStartedAt,
+        )
+        sb.appendLine(
+            "本次窗口关联拦截: ${sessionBlocks.size} 条" +
+                if (sessionBlocks.isEmpty()) {
+                    ""
+                } else {
+                    " / " + sessionBlocks.takeLast(6).joinToString(", ") { it.host }
+                }
+        )
+        sb.appendLine("本次窗口出现摇一摇文案: ${yesNo(A11yState.windowSawShake)}")
         sb.appendLine("事件/扫描/点击: ${A11yState.eventCount} / ${A11yState.scanCount} / ${A11yState.clickCount}")
         sb.appendLine("今日跳过: ${prefs.todaySkipCount()}")
         sb.appendLine("最近跳过: ${formatWall(prefs.lastSkipAt())} / ${prefs.lastSkipPkg() ?: "-"}")
@@ -241,6 +300,19 @@ object DiagnosticReport {
     }.getOrDefault(pkg)
 
     private fun yesNo(b: Boolean) = if (b) "是" else "否"
+
+    private fun bucketLine(labels: Array<String>, counts: LongArray): String =
+        labels.indices.joinToString(" ") { "${labels[it]}=${counts.getOrElse(it) { 0L }}" }
+
+    /** 从本次窗口开始到点击的延迟；窗口和点击不是同一个包时不算 */
+    private fun windowClickLatencyMs(): String {
+        val start = A11yState.windowStartedAt
+        val click = A11yState.lastClickAt
+        if (start <= 0L || click <= 0L) return "-"
+        if (A11yState.windowPkg != A11yState.lastClickPkg) return "-"
+        if (click < start) return "-"
+        return "${click - start}ms"
+    }
 
     private fun formatWall(ms: Long): String =
         if (ms <= 0L) "-" else stampFull.format(Date(ms))
